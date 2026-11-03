@@ -572,7 +572,7 @@
   function extractXMP(buf) {
     const bytes = new Uint8Array(buf);
     let text = "";
-    const chunkSize = 1 << 20;
+    const chunkSize = 8192; // must stay well under JS engines' Function.apply argument limit
     for (let i = 0; i < bytes.length; i += chunkSize) {
       text += String.fromCharCode.apply(null, bytes.subarray(i, Math.min(i+chunkSize, bytes.length)));
       if (text.includes("</x:xmpmeta>")) break;
@@ -627,10 +627,16 @@
     reader.onerror = () => showToast(`Échec de lecture du fichier "${file.name}".`);
     reader.onload = function(e) {
       const buf = e.target.result;
-      const segments = parseJPEGSegments(buf);
-      const exif = parseEXIF(buf, segments);
-      const xmp = extractXMP(buf);
-      const dji = extractDJIFields(xmp);
+      let segments = [], exif = { model: null, make: null, dateTime: null, gps: null, gpsAlt: null }, dji = {}, xmp = null;
+      try {
+        segments = parseJPEGSegments(buf);
+        exif = parseEXIF(buf, segments);
+        xmp = extractXMP(buf);
+        dji = extractDJIFields(xmp);
+      } catch (err) {
+        console.error("Lecture des métadonnées échouée pour " + file.name, err);
+        showToast(`Métadonnées illisibles pour "${file.name}" — la photo s'affiche quand même, sans ces infos.`);
+      }
 
       const blob = new Blob([buf], { type: mimeType });
       const url = URL.createObjectURL(blob);
