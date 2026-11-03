@@ -309,7 +309,7 @@
         <div class="canvas-empty" id="canvas-empty">Sélectionnez une image dans la liste pour l'analyser.<br><span style="font-size:0.8rem;">Molette = zoom · glisser = déplacer · outil Zone = dessiner un rectangle</span></div>
         <canvas id="main-canvas"></canvas>
         <div class="probe-readout" id="probe-readout">
-          <div><div class="l">Intensité</div><div class="v mono" id="probe-val">—</div></div>
+          <div><div class="l" id="probe-label">Intensité</div><div class="v mono" id="probe-val">—</div></div>
           <div><div class="l">Pixel</div><div class="v mono" id="probe-pos">—</div></div>
         </div>
       </div>
@@ -328,6 +328,14 @@
             <div class="kv"><span class="k">GPS</span><span class="v" id="m-gps">—</span></div>
             <div class="kv"><span class="k">Altitude relative</span><span class="v" id="m-alt">—</span></div>
             <div class="kv"><span class="k">Résolution</span><span class="v" id="m-dim">—</span></div>
+          </div>
+          <div id="thermal-params" style="display:none;margin-top:16px;">
+            <h2>Étalonnage thermique (DJI)</h2>
+            <div class="kv"><span class="k">Plage détectée</span><span class="v mono" id="tp-range">—</span></div>
+            <div class="kv"><span class="k">Distance</span><span class="v" id="tp-distance">—</span></div>
+            <div class="kv"><span class="k">Émissivité</span><span class="v" id="tp-emissivity">—</span></div>
+            <div class="kv"><span class="k">Humidité</span><span class="v" id="tp-humidity">—</span></div>
+            <div class="kv"><span class="k">Temp. ambiante</span><span class="v" id="tp-ambient">—</span></div>
           </div>
         </div>
       </section>
@@ -601,6 +609,89 @@
     return fields;
   }
 
+  // ---------- DJI RADIOMETRIC THERMAL DECODING ----------
+  // DJI R-JPEGs (Matrice 4T, M30T, M3T...) embed the raw 16-bit thermal sensor
+  // plane as a chain of APP3 segments, and separately embed a small JSON blob
+  // (in an APP1 segment) giving the scene's real temperature_range in °C.
+  // There is no public spec for DJI's exact per-pixel radiometric formula, but
+  // a linear mapping anchored to that reported min/max matches real scenes
+  // closely enough to be useful — this is an estimation, not DJI's exact
+  // internal Planck-law conversion, and is labelled as such in the UI.
+  function extractThermalCalibration(buf, segments) {
+    try {
+      const e3 = segments.filter(s => s.marker === "E3");
+      if (!e3.length) return null;
+      let totalLen = 0;
+      e3.forEach(s => totalLen += (s.length - 2));
+      const knownDims = [[640,512],[336,256],[160,120]];
+      const dims = knownDims.find(([w,h]) => w*h*2 === totalLen);
+      if (!dims) return null;
+      const [tw, th] = dims;
+
+      const view = new DataView(buf);
+      const raw = new Uint16Array(tw*th);
+      let idx = 0;
+      e3.forEach(s => {
+        const start = s.offset + 4, byteLen = s.length - 2;
+        for (let o = 0; o + 1 < byteLen; o += 2) raw[idx++] = view.getUint16(start + o, true);
+      });
+      let rawMin = 65535, rawMax = 0;
+      for (let i = 0; i < raw.length; i++) {
+        const v = raw[i];
+        if (v < rawMin) rawMin = v;
+        if (v > rawMax) rawMax = v;
+      }
+      if (rawMax <= rawMin) return null;
+
+      let text = "";
+      segments.filter(s => s.marker === "E1").forEach(s => {
+        const start = s.offset + 4, byteLen = s.length - 2;
+        const bytes = new Uint8Array(buf, start, byteLen);
+        const chunk = 8192;
+        for (let i = 0; i < bytes.length; i += chunk) {
+          text += String.fromCharCode.apply(null, bytes.subarray(i, Math.min(i+chunk, bytes.length)));
+        }
+      });
+      const m = text.match(/\{"elements":null.*?"temperature_range":\{[^}]*\}\}/);
+      if (!m) return null;
+      const meta = JSON.parse(m[0]);
+      const tLow = meta.temperature_range && meta.temperature_range.low;
+      const tHigh = meta.temperature_range && meta.temperature_range.high;
+      if (typeof tLow !== "number" || typeof tHigh !== "number" || tHigh <= tLow) return null;
+
+      const toTemp = (v) => tLow + (v - rawMin) * (tHigh - tLow) / (rawMax - rawMin);
+      return { w: tw, h: th, raw, rawMin, rawMax, tLow, tHigh, toTemp, params: meta.measurement_params || null };
+    } catch (err) {
+      console.error("Décodage thermique échoué", err);
+      return null;
+    }
+  }
+
+  function buildTempGrid(thermal, outW, outH) {
+    const grid = new Float32Array(outW * outH);
+    const sx = thermal.w / outW, sy = thermal.h / outH;
+    for (let y = 0; y < outH; y++) {
+      const ty = Math.min(thermal.h - 1, Math.floor(y * sy));
+      const rowBase = ty * thermal.w;
+      for (let x = 0; x < outW; x++) {
+        const tx = Math.min(thermal.w - 1, Math.floor(x * sx));
+        grid[y*outW + x] = thermal.toTemp(thermal.raw[rowBase + tx]);
+      }
+    }
+    return grid;
+  }
+
+  function getPixelReading(rec, x, y) {
+    if (rec.thermal && rec.thermal.tempGrid) {
+      if (x < 0 || y < 0 || x >= rec.w || y >= rec.h) return null;
+      return { value: rec.thermal.tempGrid[y*rec.w + x], unit: "°C", isTemp: true };
+    }
+    if (!imageData || x < 0 || y < 0 || x >= canvas.width || y >= canvas.height) return null;
+    const idx = (y * canvas.width + x) * 4;
+    const d = imageData.data;
+    return { value: 0.299*d[idx] + 0.587*d[idx+1] + 0.114*d[idx+2], unit: "", isTemp: false };
+  }
+
   // ---------- IMAGE LOADING ----------
   function detectImageType(file) {
     if (file.type && file.type.startsWith("image/")) return file.type;
@@ -627,12 +718,13 @@
     reader.onerror = () => showToast(`Échec de lecture du fichier "${file.name}".`);
     reader.onload = function(e) {
       const buf = e.target.result;
-      let segments = [], exif = { model: null, make: null, dateTime: null, gps: null, gpsAlt: null }, dji = {}, xmp = null;
+      let segments = [], exif = { model: null, make: null, dateTime: null, gps: null, gpsAlt: null }, dji = {}, xmp = null, thermal = null;
       try {
         segments = parseJPEGSegments(buf);
         exif = parseEXIF(buf, segments);
         xmp = extractXMP(buf);
         dji = extractDJIFields(xmp);
+        thermal = extractThermalCalibration(buf, segments);
       } catch (err) {
         console.error("Lecture des métadonnées échouée pour " + file.name, err);
         showToast(`Métadonnées illisibles pour "${file.name}" — la photo s'affiche quand même, sans ces infos.`);
@@ -652,9 +744,14 @@
           gps: exif.gps || (dji.gpsLatitude && dji.gpsLongitude ? { lat: parseFloat(dji.gpsLatitude), lon: parseFloat(dji.gpsLongitude) } : null),
           alt: dji.relativeAltitude || null,
           w: img.naturalWidth, h: img.naturalHeight,
-          segments, xmp, dji,
-          maxI: 0, avgI: 0, hotPct: 0,
+          segments, xmp, dji, thermal,
+          maxI: 0, avgI: 0, hotPct: 0, hotThreshold: null,
         };
+        if (thermal) {
+          thermal.tempGrid = buildTempGrid(thermal, record.w, record.h);
+          const ambient = thermal.params && typeof thermal.params.ambient_temp === "number" ? thermal.params.ambient_temp : null;
+          record.hotThreshold = ambient !== null ? +(ambient + 10).toFixed(1) : +(thermal.tLow + 0.75*(thermal.tHigh - thermal.tLow)).toFixed(1);
+        }
         computeStats(record);
         images.push(record);
         renderThumbList();
@@ -668,6 +765,21 @@
   }
 
   function computeStats(record) {
+    if (record.thermal && record.thermal.tempGrid) {
+      const grid = record.thermal.tempGrid;
+      const threshold = record.hotThreshold;
+      let max = -Infinity, sum = 0, hot = 0;
+      for (let i = 0; i < grid.length; i++) {
+        const t = grid[i];
+        if (t > max) max = t;
+        sum += t;
+        if (t >= threshold) hot++;
+      }
+      record.maxI = +max.toFixed(1);
+      record.avgI = +(sum / grid.length).toFixed(1);
+      record.hotPct = +(100 * hot / grid.length).toFixed(1);
+      return;
+    }
     const tmp = document.createElement("canvas");
     tmp.width = record.w; tmp.height = record.h;
     const tctx = tmp.getContext("2d", { willReadFrequently: true });
@@ -696,7 +808,8 @@
     images.forEach(rec => {
       const btn = document.createElement("button");
       btn.className = "thumb-item" + (rec.id === activeId ? " active" : "");
-      btn.innerHTML = `<img src="${rec.url}" alt=""><div class="meta"><div class="name">${escapeHtml(rec.name)}</div><div class="stat">${rec.hotPct > 5 ? '<span class="hotspot-dot"></span>' : ''}max ${rec.maxI} · ${rec.hotPct}% chaud</div></div>`;
+      const unit = rec.thermal ? "°C" : "";
+      btn.innerHTML = `<img src="${rec.url}" alt=""><div class="meta"><div class="name">${escapeHtml(rec.name)}</div><div class="stat">${rec.hotPct > 5 ? '<span class="hotspot-dot"></span>' : ''}max ${rec.maxI}${unit} · ${rec.hotPct}% chaud</div></div>`;
       btn.addEventListener("click", () => selectImage(rec.id));
       list.appendChild(btn);
     });
@@ -712,8 +825,9 @@
     images.forEach((rec, i) => {
       const tr = document.createElement("tr");
       const gpsStr = rec.gps ? `${rec.gps.lat.toFixed(5)}, ${rec.gps.lon.toFixed(5)}` : "—";
+      const unit = rec.thermal ? "°C" : "";
       tr.innerHTML = `<td>${i+1}</td><td>${escapeHtml(rec.name)}</td><td>${escapeHtml(rec.date)}</td><td>${gpsStr}</td>
-        <td class="num mono">${rec.maxI}</td><td class="num mono">${rec.avgI}</td><td class="num mono">${rec.hotPct}%</td>
+        <td class="num mono">${rec.maxI}${unit}</td><td class="num mono">${rec.avgI}${unit}</td><td class="num mono">${rec.hotPct}%</td>
         <td><button class="row-link" data-id="${rec.id}">Voir →</button></td>`;
       tr.querySelector(".row-link").addEventListener("click", () => selectImage(rec.id));
       tbody.appendChild(tr);
@@ -750,12 +864,33 @@
     el("m-dim").textContent = `${rec.w} × ${rec.h}px`;
 
     const calibBadge = el("calib-badge");
-    if (rec.dji.hasThermalHint) {
-      calibBadge.textContent = "Segment thermique détecté — non décodé";
-      calibBadge.className = "badge relative";
+    const thresholdEl = el("threshold");
+    if (rec.thermal) {
+      calibBadge.textContent = "Calibré — estimation °C (DJI)";
+      calibBadge.className = "badge calibrated";
+      el("thermal-params").style.display = "block";
+      el("tp-range").textContent = `${rec.thermal.tLow.toFixed(1)}°C à ${rec.thermal.tHigh.toFixed(1)}°C`;
+      const p = rec.thermal.params || {};
+      el("tp-distance").textContent = typeof p.distance === "number" ? `${p.distance} m` : "—";
+      el("tp-emissivity").textContent = typeof p.emissivity === "number" ? p.emissivity : "—";
+      el("tp-humidity").textContent = typeof p.humidity === "number" ? `${p.humidity}%` : "—";
+      el("tp-ambient").textContent = typeof p.ambient_temp === "number" ? `${p.ambient_temp}°C` : "—";
+      thresholdEl.min = Math.floor(rec.thermal.tLow);
+      thresholdEl.max = Math.ceil(rec.thermal.tHigh);
+      thresholdEl.step = "0.5";
+      thresholdEl.value = rec.hotThreshold;
+      el("threshold-val").textContent = rec.hotThreshold + "°C";
     } else {
-      calibBadge.textContent = "Image non thermique / non calibrée";
-      calibBadge.className = "badge";
+      el("thermal-params").style.display = "none";
+      if (rec.dji.hasThermalHint) {
+        calibBadge.textContent = "Segment thermique détecté — non décodé";
+        calibBadge.className = "badge relative";
+      } else {
+        calibBadge.textContent = "Image non thermique / non calibrée";
+        calibBadge.className = "badge";
+      }
+      thresholdEl.min = "0"; thresholdEl.max = "255"; thresholdEl.step = "1"; thresholdEl.value = "200";
+      el("threshold-val").textContent = "200";
     }
 
     const diagLines = [];
@@ -766,6 +901,16 @@
     diagLines.push(`Champs DJI (XMP) détectés:`);
     diagLines.push(JSON.stringify(rec.dji, null, 2));
     if (!Object.keys(rec.dji).length) diagLines.push("  (aucun champ drone-dji trouvé dans le XMP)");
+    diagLines.push(``);
+    diagLines.push(`Décodage thermique radiométrique:`);
+    if (rec.thermal) {
+      diagLines.push(`  Plan brut: ${rec.thermal.w}×${rec.thermal.h} 16 bits (${rec.thermal.raw.length * 2} octets)`);
+      diagLines.push(`  Valeurs brutes: min=${rec.thermal.rawMin} max=${rec.thermal.rawMax}`);
+      diagLines.push(`  Plage °C (déclarée par DJI dans le fichier): ${rec.thermal.tLow.toFixed(2)} à ${rec.thermal.tHigh.toFixed(2)}`);
+      diagLines.push(`  Méthode: interpolation linéaire entre ces deux bornes (estimation, pas le calcul DJI exact)`);
+    } else {
+      diagLines.push(`  Aucun plan thermique radiométrique exploitable trouvé dans ce fichier.`);
+    }
     el("diag-pre").textContent = diagLines.join("\n");
 
     drawActiveImage();
@@ -791,13 +936,16 @@
   }
 
   function applyHotspotOverlay() {
-    const threshold = parseInt(el("threshold").value, 10);
+    const threshold = parseFloat(el("threshold").value);
+    const rec = images.find(r => r.id === activeId);
+    const grid = rec && rec.thermal ? rec.thermal.tempGrid : null;
     const d = imageData.data;
     const overlay = ctx.getImageData(0,0,canvas.width,canvas.height);
     const od = overlay.data;
     for (let i = 0; i < d.length; i += 4) {
-      const lum = 0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2];
-      if (lum >= threshold) {
+      const px = (i/4) % canvas.width, py = Math.floor((i/4) / canvas.width);
+      const v = grid ? grid[py*canvas.width + px] : (0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2]);
+      if (v >= threshold) {
         od[i] = 232; od[i+1] = 72; od[i+2] = 58; od[i+3] = 150;
       } else {
         od[i+3] = 0;
@@ -807,7 +955,6 @@
     // redraw base then overlay composited properly
     ctx.save();
     ctx.globalCompositeOperation = "destination-over";
-    const rec = images.find(r => r.id === activeId);
     ctx.drawImage(rec.img, 0, 0);
     ctx.restore();
   }
@@ -820,12 +967,6 @@
     return { x: Math.floor(xRatio * canvas.width), y: Math.floor(yRatio * canvas.height) };
   }
 
-  function pixelLuminance(x, y) {
-    if (!imageData || x < 0 || y < 0 || x >= canvas.width || y >= canvas.height) return null;
-    const idx = (y * canvas.width + x) * 4;
-    const d = imageData.data;
-    return Math.round(0.299*d[idx] + 0.587*d[idx+1] + 0.114*d[idx+2]);
-  }
 
   wrap.addEventListener("wheel", (e) => {
     if (!activeId) return;
@@ -864,10 +1005,12 @@
     }
     if (tool === "point") {
       const p = canvasToImageCoords(e.clientX, e.clientY);
-      const lum = pixelLuminance(p.x, p.y);
-      if (lum !== null) {
+      const rec = images.find(r => r.id === activeId);
+      const reading = rec ? getPixelReading(rec, p.x, p.y) : null;
+      if (reading !== null) {
         el("probe-readout").classList.add("show");
-        el("probe-val").textContent = lum;
+        el("probe-label").textContent = reading.isTemp ? "Température" : "Intensité";
+        el("probe-val").textContent = (reading.isTemp ? reading.value.toFixed(1) : Math.round(reading.value)) + reading.unit;
         el("probe-pos").textContent = `${p.x}, ${p.y}`;
       }
     }
@@ -904,24 +1047,30 @@
     const y = Math.max(0, Math.min(rectCurrent.y1, rectCurrent.y2));
     const x2 = Math.min(canvas.width, Math.max(rectCurrent.x1, rectCurrent.x2));
     const y2 = Math.min(canvas.height, Math.max(rectCurrent.y1, rectCurrent.y2));
-    const threshold = parseInt(el("threshold").value, 10);
-    let min = 255, max = 0, sum = 0, count = 0, hot = 0;
+    const threshold = parseFloat(el("threshold").value);
+    const rec = images.find(r => r.id === activeId);
+    const grid = rec && rec.thermal ? rec.thermal.tempGrid : null;
+    const unit = grid ? "°C" : "";
+    let min = Infinity, max = -Infinity, sum = 0, count = 0, hot = 0;
     const d = imageData.data;
     for (let py = y; py < y2; py++) {
       for (let px = x; px < x2; px++) {
-        const idx = (py * canvas.width + px) * 4;
-        const lum = 0.299*d[idx] + 0.587*d[idx+1] + 0.114*d[idx+2];
-        if (lum < min) min = lum;
-        if (lum > max) max = lum;
-        sum += lum; count++;
-        if (lum >= threshold) hot++;
+        const v = grid ? grid[py*canvas.width + px] : (() => {
+          const idx = (py * canvas.width + px) * 4;
+          return 0.299*d[idx] + 0.587*d[idx+1] + 0.114*d[idx+2];
+        })();
+        if (v < min) min = v;
+        if (v > max) max = v;
+        sum += v; count++;
+        if (v >= threshold) hot++;
       }
     }
     if (count === 0) return;
+    const fmt = (v) => grid ? v.toFixed(1) : Math.round(v);
     el("selection-section").style.display = "block";
-    el("sel-min").textContent = Math.round(min);
-    el("sel-max").textContent = Math.round(max);
-    el("sel-avg").textContent = Math.round(sum / count);
+    el("sel-min").textContent = fmt(min) + unit;
+    el("sel-max").textContent = fmt(max) + unit;
+    el("sel-avg").textContent = fmt(sum / count) + unit;
     el("sel-hot").textContent = `${hot} px (${(100*hot/count).toFixed(1)}%)`;
   }
 
@@ -941,7 +1090,8 @@
   });
 
   el("threshold").addEventListener("input", (e) => {
-    el("threshold-val").textContent = e.target.value;
+    const rec = images.find(r => r.id === activeId);
+    el("threshold-val").textContent = e.target.value + (rec && rec.thermal ? "°C" : "");
     if (activeId) drawActiveImage();
   });
   el("hotspot-toggle").addEventListener("change", () => { if (activeId) drawActiveImage(); });
@@ -968,11 +1118,12 @@
 
   // ---------- EXPORTS ----------
   el("export-csv").addEventListener("click", () => {
-    const header = ["Fichier","Date","GPS_lat","GPS_lon","Altitude_m","Intensite_max","Intensite_moy","Points_chauds_pct"];
+    const header = ["Fichier","Date","GPS_lat","GPS_lon","Altitude_m","Unite","Valeur_max","Valeur_moy","Points_chauds_pct","Mode"];
     const rows = images.map(r => [
       r.name, r.date,
       r.gps ? r.gps.lat.toFixed(6) : "", r.gps ? r.gps.lon.toFixed(6) : "",
-      r.alt || "", r.maxI, r.avgI, r.hotPct
+      r.alt || "", r.thermal ? "°C" : "relatif(0-255)", r.maxI, r.avgI, r.hotPct,
+      r.thermal ? "Calibré (estimation DJI)" : "Intensité relative"
     ]);
     const csv = [header, ...rows].map(row => row.map(v => `"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
     downloadBlob(new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" }), "inspection-thermique.csv");
@@ -987,7 +1138,7 @@
     doc.text("Rapport d'inspection thermique", margin, 22);
     doc.setFontSize(10);
     doc.setTextColor(120);
-    doc.text(`Généré le ${new Date().toLocaleDateString("fr-FR")} — ${images.length} image(s) — mode intensité relative (non calibré)`, margin, 29);
+    doc.text(`Généré le ${new Date().toLocaleDateString("fr-FR")} — ${images.length} image(s)`, margin, 29);
     doc.setTextColor(0);
 
     for (let i = 0; i < images.length; i++) {
@@ -1015,7 +1166,16 @@
       y += Math.min(imgH, 140) + 8;
 
       doc.setFontSize(10);
-      doc.text(`Intensité max: ${rec.maxI}/255   Intensité moyenne: ${rec.avgI}/255   Points chauds: ${rec.hotPct}%`, margin, y);
+      if (rec.thermal) {
+        doc.text(`Température max: ${rec.maxI}°C   Moyenne: ${rec.avgI}°C   Points chauds (≥${rec.hotThreshold}°C): ${rec.hotPct}%`, margin, y);
+        y += 5;
+        doc.setFontSize(8);
+        doc.setTextColor(120);
+        doc.text(`Estimation calibrée à partir des données DJI intégrées — pas une mesure radiométrique certifiée.`, margin, y);
+        doc.setTextColor(0);
+      } else {
+        doc.text(`Intensité max: ${rec.maxI}/255   Intensité moyenne: ${rec.avgI}/255   Points chauds: ${rec.hotPct}%`, margin, y);
+      }
     }
     doc.save("rapport-inspection-thermique.pdf");
   });
