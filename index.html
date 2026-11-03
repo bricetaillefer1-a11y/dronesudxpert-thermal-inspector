@@ -169,6 +169,12 @@
 
   a:focus-visible,button:focus-visible,.thumb-item:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
 
+  .toast{
+    background:#2A1414;border:1px solid #5A2323;color:#F2B8B0;
+    padding:12px 16px;border-radius:8px;font-size:0.84rem;box-shadow:0 8px 24px rgba(0,0,0,0.4);
+    transition:opacity .3s ease;
+  }
+
   /* TABS */
   .tabbar{display:flex;gap:4px;padding:0 20px;border-bottom:1px solid var(--border);background:var(--surface);}
   .tab-btn{
@@ -244,6 +250,8 @@
   .model-loading.show{display:flex;}
 </style>
 
+<div id="toast-stack" style="position:fixed;bottom:16px;right:16px;z-index:9999;display:flex;flex-direction:column;gap:8px;max-width:360px;"></div>
+
 <div class="app">
   <header>
     <div class="brand">
@@ -255,7 +263,7 @@
     </div>
     <div class="header-actions">
       <label class="btn btn-accent" for="file-input">+ Importer des photos</label>
-      <input type="file" id="file-input" accept="image/jpeg,image/jpg,.jpg,.jpeg" multiple>
+      <input type="file" id="file-input" accept="image/*" multiple>
       <button class="btn" id="export-csv" disabled>Export CSV</button>
       <button class="btn" id="export-pdf" disabled>Rapport PDF</button>
       <button class="btn" id="clear-all" disabled>Tout effacer</button>
@@ -447,6 +455,16 @@
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   const wrap = el("canvas-wrap");
 
+  function showToast(message) {
+    const stack = el("toast-stack");
+    if (!stack) { console.warn(message); return; }
+    const toast = document.createElement("div");
+    toast.className = "toast";
+    toast.textContent = message;
+    stack.appendChild(toast);
+    setTimeout(() => { toast.style.opacity = "0"; setTimeout(() => toast.remove(), 300); }, 7000);
+  }
+
   // ---------- MINIMAL JPEG / EXIF / XMP PARSER ----------
   function parseJPEGSegments(buf) {
     const view = new DataView(buf);
@@ -577,15 +595,29 @@
   }
 
   // ---------- IMAGE LOADING ----------
+  function detectImageType(file) {
+    if (file.type && file.type.startsWith("image/")) return file.type;
+    const ext = (file.name.split(".").pop() || "").toLowerCase();
+    const map = { jpg:"image/jpeg", jpeg:"image/jpeg", png:"image/png", webp:"image/webp", gif:"image/gif", bmp:"image/bmp" };
+    return map[ext] || null;
+  }
+
   function handleFiles(fileList) {
-    const files = Array.from(fileList).filter(f => /image\/jpe?g/.test(f.type) || /\.jpe?g$/i.test(f.name));
-    if (!files.length) return;
+    const all = Array.from(fileList);
+    const accepted = [], rejected = [];
+    all.forEach(f => (detectImageType(f) ? accepted : rejected).push(f));
+    if (rejected.length) {
+      showToast(`Format non reconnu : ${rejected.map(f => f.name).join(", ")}. Formats acceptés : JPG, PNG, WebP, GIF, BMP (pas HEIC).`);
+    }
+    if (!accepted.length) return;
     el("empty-hint").style.display = "none";
-    files.forEach(loadOneFile);
+    accepted.forEach(loadOneFile);
   }
 
   function loadOneFile(file) {
+    const mimeType = detectImageType(file);
     const reader = new FileReader();
+    reader.onerror = () => showToast(`Échec de lecture du fichier "${file.name}".`);
     reader.onload = function(e) {
       const buf = e.target.result;
       const segments = parseJPEGSegments(buf);
@@ -593,9 +625,10 @@
       const xmp = extractXMP(buf);
       const dji = extractDJIFields(xmp);
 
-      const blob = new Blob([buf], { type: "image/jpeg" });
+      const blob = new Blob([buf], { type: mimeType });
       const url = URL.createObjectURL(blob);
       const img = new Image();
+      img.onerror = () => showToast(`Impossible d'afficher "${file.name}" — format non supporté par ce navigateur (HEIC notamment).`);
       img.onload = function() {
         const id = "img_" + Date.now() + "_" + Math.random().toString(36).slice(2,8);
         const record = {
