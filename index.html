@@ -1,0 +1,1303 @@
+<title>Inspecteur Thermique</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/OBJLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/MTLLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/geotiff@2.1.3/dist-browser/geotiff.js"></script>
+<style>
+  :root{
+    --bg:#11161C;
+    --surface:#1A212B;
+    --surface-2:#222B37;
+    --border:#2E3946;
+    --text:#E7ECF2;
+    --text-dim:#8C98A6;
+    --accent:#E8914A;
+    --accent-dim:#7A5330;
+    --cool:#4A90C8;
+    --hot:#E8483A;
+    --good:#4FAE7A;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  html,body{height:100%;}
+  body{
+    font-family:'IBM Plex Sans',sans-serif;
+    background:var(--bg);
+    color:var(--text);
+    line-height:1.5;
+    overflow-x:hidden;
+  }
+  .mono{font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums;}
+  h1,h2,h3{font-weight:600;letter-spacing:0.1px;}
+  button{font-family:inherit;cursor:pointer;}
+  a{color:var(--cool);}
+
+  /* APP SHELL */
+  .app{display:flex;flex-direction:column;min-height:100vh;}
+  header{
+    display:flex;align-items:center;justify-content:space-between;gap:16px;
+    padding:14px 20px;border-bottom:1px solid var(--border);background:var(--surface);
+    flex-wrap:wrap;
+  }
+  .brand{display:flex;align-items:center;gap:10px;}
+  .brand .mark{
+    width:30px;height:30px;border-radius:7px;
+    background:linear-gradient(135deg,#4A2FB8 0%,var(--hot) 55%,#F2C94C 100%);
+    flex-shrink:0;
+  }
+  .brand h1{font-size:1.1rem;}
+  .brand .sub{font-size:0.78rem;color:var(--text-dim);}
+  .header-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
+  .btn{
+    display:inline-flex;align-items:center;gap:8px;padding:9px 16px;border-radius:6px;
+    border:1px solid var(--border);background:var(--surface-2);color:var(--text);
+    font-size:0.88rem;font-weight:500;transition:border-color .15s ease, background .15s ease;
+  }
+  .btn:hover{border-color:var(--accent);}
+  .btn-accent{background:var(--accent);border-color:var(--accent);color:#1A1208;font-weight:600;}
+  .btn-accent:hover{background:#f2a05f;}
+  .btn:disabled{opacity:0.4;cursor:not-allowed;}
+  .btn:disabled:hover{border-color:var(--border);}
+  input[type="file"]{display:none;}
+
+  .notice{
+    background:#2A2113;border-bottom:1px solid #4A3A1E;color:#E8C77A;
+    padding:9px 20px;font-size:0.83rem;display:flex;gap:10px;align-items:center;
+  }
+  .notice strong{color:#F2C94C;}
+
+  .layout{display:grid;grid-template-columns:260px 1fr 300px;flex:1;min-height:0;}
+  @media(max-width:1100px){.layout{grid-template-columns:220px 1fr 260px;}}
+  @media(max-width:860px){.layout{grid-template-columns:1fr;}}
+
+  /* SIDEBAR - BATCH LIST */
+  .sidebar{
+    border-right:1px solid var(--border);background:var(--surface);
+    padding:14px;overflow-y:auto;
+  }
+  .sidebar h2,.panel h2{font-size:0.75rem;text-transform:uppercase;letter-spacing:0.6px;color:var(--text-dim);margin-bottom:12px;}
+  .empty-hint{
+    border:1.5px dashed var(--border);border-radius:8px;padding:22px 14px;text-align:center;
+    color:var(--text-dim);font-size:0.85rem;
+  }
+  .thumb-list{display:flex;flex-direction:column;gap:8px;}
+  .thumb-item{
+    display:flex;gap:10px;align-items:center;padding:8px;border-radius:8px;
+    border:1px solid transparent;background:var(--surface-2);cursor:pointer;text-align:left;width:100%;
+  }
+  .thumb-item:hover{border-color:var(--border);}
+  .thumb-item.active{border-color:var(--accent);background:#2A2013;}
+  .thumb-item img{width:46px;height:46px;object-fit:cover;border-radius:5px;flex-shrink:0;background:#000;}
+  .thumb-item .meta{min-width:0;flex:1;}
+  .thumb-item .name{font-size:0.82rem;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .thumb-item .stat{font-size:0.74rem;color:var(--text-dim);}
+  .hotspot-dot{width:7px;height:7px;border-radius:50%;background:var(--hot);display:inline-block;margin-right:4px;}
+
+  /* MAIN VIEWER */
+  .viewer{display:flex;flex-direction:column;min-width:0;}
+  .toolbar{
+    display:flex;gap:10px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--border);
+    background:var(--surface);flex-wrap:wrap;
+  }
+  .tool-group{display:flex;gap:4px;background:var(--surface-2);border:1px solid var(--border);border-radius:7px;padding:3px;}
+  .tool-btn{
+    padding:6px 12px;border-radius:5px;border:none;background:transparent;color:var(--text-dim);font-size:0.82rem;font-weight:500;
+  }
+  .tool-btn.active{background:var(--accent);color:#1A1208;}
+  .toolbar label{font-size:0.8rem;color:var(--text-dim);display:flex;align-items:center;gap:6px;}
+  .toolbar input[type="range"]{width:120px;accent-color:var(--accent);}
+
+  .canvas-wrap{
+    flex:1;position:relative;overflow:hidden;background:
+      linear-gradient(45deg,#161B22 25%,transparent 25%),linear-gradient(-45deg,#161B22 25%,transparent 25%),
+      linear-gradient(45deg,transparent 75%,#161B22 75%),linear-gradient(-45deg,transparent 75%,#161B22 75%);
+    background-size:20px 20px;background-position:0 0,0 10px,10px -10px,-10px 0;
+    background-color:#0D1116;
+    display:flex;align-items:center;justify-content:center;
+  }
+  .canvas-wrap canvas{position:absolute;cursor:crosshair;}
+  .canvas-empty{color:var(--text-dim);font-size:0.9rem;text-align:center;padding:24px;}
+  .probe-readout{
+    position:absolute;bottom:14px;left:14px;background:rgba(17,22,28,0.92);border:1px solid var(--border);
+    border-radius:8px;padding:10px 14px;font-size:0.8rem;display:none;gap:16px;
+  }
+  .probe-readout.show{display:flex;}
+  .probe-readout .v{font-size:1.05rem;font-weight:600;}
+  .probe-readout .l{color:var(--text-dim);font-size:0.72rem;text-transform:uppercase;letter-spacing:0.4px;}
+
+  /* RIGHT PANEL */
+  .panel{border-left:1px solid var(--border);background:var(--surface);padding:14px;overflow-y:auto;}
+  .panel section{margin-bottom:22px;}
+  .kv{display:flex;justify-content:space-between;gap:10px;padding:5px 0;border-bottom:1px solid var(--border);font-size:0.83rem;}
+  .kv .k{color:var(--text-dim);}
+  .kv .v{font-weight:500;text-align:right;}
+  .badge{
+    display:inline-flex;align-items:center;gap:6px;font-size:0.76rem;padding:4px 10px;border-radius:20px;
+    background:var(--surface-2);border:1px solid var(--border);color:var(--text-dim);
+  }
+  .badge.relative{color:#F2C94C;border-color:#4A3A1E;background:#2A2113;}
+  .badge.calibrated{color:var(--good);border-color:#1F4A33;background:#122A1E;}
+  details{border:1px solid var(--border);border-radius:8px;padding:10px 12px;}
+  details summary{cursor:pointer;font-size:0.82rem;font-weight:500;color:var(--text-dim);}
+  details[open] summary{margin-bottom:10px;}
+  .diag-pre{
+    font-size:0.72rem;max-height:220px;overflow:auto;white-space:pre-wrap;word-break:break-all;
+    background:#0D1116;border-radius:6px;padding:10px;color:#8FE3C0;
+  }
+
+  /* BATCH TABLE */
+  .batch-section{border-top:1px solid var(--border);background:var(--surface);padding:16px 20px;}
+  .batch-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:10px;}
+  .batch-head h2{font-size:0.95rem;}
+  table{width:100%;border-collapse:collapse;font-size:0.82rem;}
+  .table-wrap{overflow-x:auto;}
+  th,td{padding:8px 12px;text-align:left;white-space:nowrap;}
+  thead th{color:var(--text-dim);text-transform:uppercase;font-size:0.7rem;letter-spacing:0.4px;border-bottom:1px solid var(--border);}
+  tbody tr{border-bottom:1px solid var(--border);}
+  tbody tr:hover{background:var(--surface-2);}
+  td.num{text-align:right;}
+  .row-link{color:var(--cool);background:none;border:none;font-size:0.8rem;font-weight:600;}
+
+  ::-webkit-scrollbar{width:10px;height:10px;}
+  ::-webkit-scrollbar-thumb{background:var(--border);border-radius:5px;}
+  ::-webkit-scrollbar-track{background:transparent;}
+
+  a:focus-visible,button:focus-visible,.thumb-item:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+
+  /* TABS */
+  .tabbar{display:flex;gap:4px;padding:0 20px;border-bottom:1px solid var(--border);background:var(--surface);}
+  .tab-btn{
+    padding:12px 16px;background:none;border:none;color:var(--text-dim);font-size:0.88rem;font-weight:500;
+    border-bottom:2px solid transparent;
+  }
+  .tab-btn.active{color:var(--text);border-bottom-color:var(--accent);}
+  .tab-view{display:none;flex-direction:column;flex:1;min-height:0;}
+  .tab-view.active{display:flex;}
+
+  /* ORTHO TAB */
+  .ortho-wrap{flex:1;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:28px;}
+  .ortho-section h2{font-size:1rem;margin-bottom:4px;}
+  .ortho-section .hint{font-size:0.82rem;color:var(--text-dim);margin-bottom:14px;}
+  .ortho-pair{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+  @media(max-width:860px){.ortho-pair{grid-template-columns:1fr;}}
+  .ortho-card{
+    border:1px solid var(--border);border-radius:10px;background:var(--surface);overflow:hidden;
+    display:flex;flex-direction:column;
+  }
+  .ortho-card-head{
+    display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid var(--border);
+    font-size:0.82rem;
+  }
+  .ortho-card-head .tag{font-weight:600;}
+  .ortho-card-head .tag.rgb{color:var(--cool);}
+  .ortho-card-head .tag.ir{color:var(--hot);}
+  .ortho-drop{
+    flex:1;min-height:260px;display:flex;align-items:center;justify-content:center;position:relative;
+    background:
+      linear-gradient(45deg,#161B22 25%,transparent 25%),linear-gradient(-45deg,#161B22 25%,transparent 25%),
+      linear-gradient(45deg,transparent 75%,#161B22 75%),linear-gradient(-45deg,transparent 75%,#161B22 75%);
+    background-size:20px 20px;background-position:0 0,0 10px,10px -10px,-10px 0;background-color:#0D1116;
+    overflow:hidden;
+  }
+  .ortho-drop canvas{position:absolute;cursor:grab;}
+  .ortho-drop.dragging canvas{cursor:grabbing;}
+  .ortho-empty{color:var(--text-dim);font-size:0.82rem;text-align:center;padding:20px;}
+  .ortho-empty label{color:var(--accent);cursor:pointer;font-weight:600;}
+  .ortho-card-foot{padding:8px 14px;border-top:1px solid var(--border);font-size:0.76rem;color:var(--text-dim);display:flex;justify-content:space-between;gap:10px;}
+  .ortho-card-foot button{background:none;border:none;color:var(--cool);font-size:0.76rem;font-weight:600;padding:0;}
+
+  .compare-toggle{display:flex;align-items:center;gap:8px;font-size:0.84rem;margin-bottom:14px;}
+  .compare-wrap{
+    position:relative;border:1px solid var(--border);border-radius:10px;overflow:hidden;background:#0D1116;
+    height:420px;display:none;
+  }
+  .compare-wrap.active{display:block;}
+  .compare-wrap img{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain;user-select:none;pointer-events:none;}
+  .compare-clip{position:absolute;top:0;left:0;height:100%;overflow:hidden;width:50%;}
+  .compare-clip img{width:var(--cw);height:100%;max-width:none;}
+  .compare-handle{
+    position:absolute;top:0;bottom:0;left:50%;width:3px;background:var(--accent);cursor:ew-resize;
+    transform:translateX(-50%);z-index:5;
+  }
+  .compare-handle::after{
+    content:"⇔";position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+    width:30px;height:30px;border-radius:50%;background:var(--accent);color:#1A1208;
+    display:flex;align-items:center;justify-content:center;font-size:0.9rem;font-weight:700;
+  }
+  .compare-label{position:absolute;top:10px;font-size:0.72rem;font-weight:700;padding:4px 10px;border-radius:4px;background:rgba(0,0,0,0.6);color:#fff;letter-spacing:0.4px;z-index:4;}
+
+  /* 3D MODEL TAB */
+  .model-pair{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+  @media(max-width:860px){.model-pair{grid-template-columns:1fr;}}
+  .model-card{border:1px solid var(--border);border-radius:10px;background:var(--surface);overflow:hidden;display:flex;flex-direction:column;}
+  .model-toolbar{display:flex;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border);flex-wrap:wrap;}
+  .model-toolbar button{font-size:0.76rem;padding:5px 10px;border-radius:5px;border:1px solid var(--border);background:var(--surface-2);color:var(--text-dim);}
+  .model-toolbar button:hover{color:var(--text);border-color:var(--accent);}
+  .model-canvas-wrap{flex:1;min-height:320px;position:relative;background:#0D1116;}
+  .model-canvas-wrap canvas{display:block;width:100%;height:100%;}
+  .model-loading{position:absolute;inset:0;display:none;align-items:center;justify-content:center;color:var(--text-dim);font-size:0.82rem;background:rgba(13,17,22,0.85);}
+  .model-loading.show{display:flex;}
+</style>
+
+<div class="app">
+  <header>
+    <div class="brand">
+      <div class="mark"></div>
+      <div>
+        <h1>Inspecteur Thermique</h1>
+        <div class="sub">DJI Matrice 4T &amp; photos classiques — mode intensité relative</div>
+      </div>
+    </div>
+    <div class="header-actions">
+      <label class="btn btn-accent" for="file-input">+ Importer des photos</label>
+      <input type="file" id="file-input" accept="image/jpeg,image/jpg,.jpg,.jpeg" multiple>
+      <button class="btn" id="export-csv" disabled>Export CSV</button>
+      <button class="btn" id="export-pdf" disabled>Rapport PDF</button>
+      <button class="btn" id="clear-all" disabled>Tout effacer</button>
+    </div>
+  </header>
+
+  <div class="tabbar">
+    <button class="tab-btn active" data-tab="thermal">Analyse thermique</button>
+    <button class="tab-btn" data-tab="ortho">Orthophotos &amp; Modèles 3D</button>
+  </div>
+
+  <div class="tab-view active" id="tab-thermal">
+  <div class="notice">
+    <span>⚠</span>
+    <span><strong>Mode intensité relative</strong> — ces valeurs reflètent la luminosité des pixels, pas encore une température en °C calibrée. Importez une photo thermique originale du Matrice 4T pour que j'active le décodage radiométrique réel (voir le panneau Diagnostic).</span>
+  </div>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <h2>Lot d'images (<span id="batch-count">0</span>)</h2>
+      <div id="empty-hint" class="empty-hint">Glissez vos photos ici,<br>ou utilisez « Importer des photos »</div>
+      <div class="thumb-list" id="thumb-list"></div>
+    </aside>
+
+    <main class="viewer">
+      <div class="toolbar">
+        <div class="tool-group">
+          <button class="tool-btn active" data-tool="point">Point</button>
+          <button class="tool-btn" data-tool="rect">Zone</button>
+        </div>
+        <label><input type="checkbox" id="hotspot-toggle"> Isoler points chauds</label>
+        <label>Seuil <input type="range" id="threshold" min="0" max="255" value="200"><span id="threshold-val" class="mono">200</span></label>
+        <label style="margin-left:auto;"><button class="btn" id="zoom-reset">Réinitialiser le zoom</button></label>
+      </div>
+      <div class="canvas-wrap" id="canvas-wrap">
+        <div class="canvas-empty" id="canvas-empty">Sélectionnez une image dans la liste pour l'analyser.<br><span style="font-size:0.8rem;">Molette = zoom · glisser = déplacer · outil Zone = dessiner un rectangle</span></div>
+        <canvas id="main-canvas"></canvas>
+        <div class="probe-readout" id="probe-readout">
+          <div><div class="l">Intensité</div><div class="v mono" id="probe-val">—</div></div>
+          <div><div class="l">Pixel</div><div class="v mono" id="probe-pos">—</div></div>
+        </div>
+      </div>
+    </main>
+
+    <aside class="panel">
+      <section>
+        <h2>Image sélectionnée</h2>
+        <div id="meta-empty" style="color:var(--text-dim);font-size:0.83rem;">Aucune image sélectionnée.</div>
+        <div id="meta-content" style="display:none;">
+          <span class="badge relative" id="calib-badge">Non calibré</span>
+          <div style="margin-top:10px;">
+            <div class="kv"><span class="k">Fichier</span><span class="v" id="m-name">—</span></div>
+            <div class="kv"><span class="k">Date</span><span class="v" id="m-date">—</span></div>
+            <div class="kv"><span class="k">Appareil</span><span class="v" id="m-model">—</span></div>
+            <div class="kv"><span class="k">GPS</span><span class="v" id="m-gps">—</span></div>
+            <div class="kv"><span class="k">Altitude relative</span><span class="v" id="m-alt">—</span></div>
+            <div class="kv"><span class="k">Résolution</span><span class="v" id="m-dim">—</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="selection-section" style="display:none;">
+        <h2>Zone sélectionnée</h2>
+        <div class="kv"><span class="k">Min</span><span class="v mono" id="sel-min">—</span></div>
+        <div class="kv"><span class="k">Max</span><span class="v mono" id="sel-max">—</span></div>
+        <div class="kv"><span class="k">Moyenne</span><span class="v mono" id="sel-avg">—</span></div>
+        <div class="kv"><span class="k">Pixels chauds</span><span class="v mono" id="sel-hot">—</span></div>
+      </section>
+
+      <section>
+        <h2>Diagnostic fichier</h2>
+        <details id="diag-details">
+          <summary>Structure JPEG &amp; métadonnées brutes</summary>
+          <div class="diag-pre" id="diag-pre">Sélectionnez une image.</div>
+        </details>
+      </section>
+    </aside>
+  </div>
+
+  <div class="batch-section">
+    <div class="batch-head">
+      <h2>Récapitulatif du lot</h2>
+      <span style="font-size:0.78rem;color:var(--text-dim);">Toutes les valeurs sont relatives (0–255), non calibrées en °C</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>#</th><th>Fichier</th><th>Date</th><th>GPS</th><th class="num">Intensité max</th><th class="num">Intensité moy.</th><th class="num">Points chauds</th><th></th></tr>
+        </thead>
+        <tbody id="batch-tbody">
+          <tr><td colspan="8" style="color:var(--text-dim);">Aucune image importée pour le moment.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  </div><!-- /tab-thermal -->
+
+  <div class="tab-view" id="tab-ortho">
+    <div class="ortho-wrap">
+      <div class="notice" style="border-radius:8px;">
+        <span>ℹ</span>
+        <span>Générez l'orthophoto et le modèle 3D avec <strong>DJI Terra</strong> (ou WebODM), puis déposez les fichiers obtenus ici pour les visualiser, les comparer RGB/infrarouge et les annoter. Ce visualiseur n'effectue aucune reconstruction photogrammétrique lui-même.</span>
+      </div>
+
+      <section class="ortho-section">
+        <h2>Orthophoto 2D</h2>
+        <p class="hint">Formats acceptés : JPG, PNG, WebP, TIFF/GeoTIFF (le rendu d'un très gros GeoTIFF peut être lent selon sa taille).</p>
+        <label class="compare-toggle"><input type="checkbox" id="compare-mode-toggle" disabled> Mode comparaison (rideau glissant RGB / infrarouge)</label>
+
+        <div class="compare-wrap" id="compare-wrap">
+          <span class="compare-label" style="left:10px;">RGB</span>
+          <span class="compare-label" style="right:10px;">INFRAROUGE</span>
+          <img id="compare-ir-full" alt="">
+          <div class="compare-clip" id="compare-clip"><img id="compare-rgb-clip" alt=""></div>
+          <div class="compare-handle" id="compare-handle"></div>
+        </div>
+
+        <div class="ortho-pair" id="ortho-pair">
+          <div class="ortho-card" data-slot="rgb">
+            <div class="ortho-card-head"><span class="tag rgb">RGB</span><span id="ortho-rgb-name">—</span></div>
+            <div class="ortho-drop" id="ortho-drop-rgb">
+              <div class="ortho-empty"><label for="ortho-file-rgb">Déposer / choisir l'orthophoto RGB</label></div>
+              <canvas id="ortho-canvas-rgb" style="display:none;"></canvas>
+              <input type="file" id="ortho-file-rgb" accept=".jpg,.jpeg,.png,.webp,.tif,.tiff,image/*" style="display:none;">
+            </div>
+            <div class="ortho-card-foot"><span id="ortho-rgb-dim">—</span><button id="ortho-rgb-reset" style="display:none;">Réinitialiser le zoom</button></div>
+          </div>
+          <div class="ortho-card" data-slot="ir">
+            <div class="ortho-card-head"><span class="tag ir">Infrarouge</span><span id="ortho-ir-name">—</span></div>
+            <div class="ortho-drop" id="ortho-drop-ir">
+              <div class="ortho-empty"><label for="ortho-file-ir">Déposer / choisir l'orthophoto infrarouge</label></div>
+              <canvas id="ortho-canvas-ir" style="display:none;"></canvas>
+              <input type="file" id="ortho-file-ir" accept=".jpg,.jpeg,.png,.webp,.tif,.tiff,image/*" style="display:none;">
+            </div>
+            <div class="ortho-card-foot"><span id="ortho-ir-dim">—</span><button id="ortho-ir-reset" style="display:none;">Réinitialiser le zoom</button></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="ortho-section">
+        <h2>Modèle 3D</h2>
+        <p class="hint">Formats acceptés : .glb/.gltf (recommandé, tout-en-un), ou .obj + .mtl + fichier(s) de texture sélectionnés ensemble.</p>
+        <div class="model-pair">
+          <div class="model-card" data-slot="rgb">
+            <div class="model-toolbar">
+              <label class="btn" style="font-size:0.78rem;padding:6px 10px;" for="model-file-rgb">Importer (RGB)</label>
+              <input type="file" id="model-file-rgb" multiple accept=".glb,.gltf,.obj,.mtl,.jpg,.jpeg,.png" style="display:none;">
+              <button data-action="wireframe" data-slot="rgb">Fil de fer</button>
+              <button data-action="reset" data-slot="rgb">Réinitialiser la vue</button>
+              <span style="margin-left:auto;font-size:0.76rem;color:var(--text-dim);align-self:center;" id="model-rgb-name">—</span>
+            </div>
+            <div class="model-canvas-wrap" id="model-canvas-wrap-rgb">
+              <div class="model-loading" id="model-loading-rgb">Chargement…</div>
+            </div>
+          </div>
+          <div class="model-card" data-slot="ir">
+            <div class="model-toolbar">
+              <label class="btn" style="font-size:0.78rem;padding:6px 10px;" for="model-file-ir">Importer (infrarouge)</label>
+              <input type="file" id="model-file-ir" multiple accept=".glb,.gltf,.obj,.mtl,.jpg,.jpeg,.png" style="display:none;">
+              <button data-action="wireframe" data-slot="ir">Fil de fer</button>
+              <button data-action="reset" data-slot="ir">Réinitialiser la vue</button>
+              <span style="margin-left:auto;font-size:0.76rem;color:var(--text-dim);align-self:center;" id="model-ir-name">—</span>
+            </div>
+            <div class="model-canvas-wrap" id="model-canvas-wrap-ir">
+              <div class="model-loading" id="model-loading-ir">Chargement…</div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div><!-- /tab-ortho -->
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  // ---------- STATE ----------
+  const images = []; // {id,file,url,img,name,date,model,gpsStr,alt,w,h,maxI,avgI,hotPct,diagText,hotThreshold}
+  let activeId = null;
+  let tool = "point";
+  let scale = 1, offsetX = 0, offsetY = 0;
+  let isPanning = false, panStartX = 0, panStartY = 0, panOrigX = 0, panOrigY = 0;
+  let isDrawingRect = false, rectStart = null, rectCurrent = null;
+  let imageData = null; // current ImageData of active image at natural resolution
+
+  const el = (id) => document.getElementById(id);
+  const canvas = el("main-canvas");
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  const wrap = el("canvas-wrap");
+
+  // ---------- MINIMAL JPEG / EXIF / XMP PARSER ----------
+  function parseJPEGSegments(buf) {
+    const view = new DataView(buf);
+    const segments = [];
+    if (view.getUint16(0) !== 0xFFD8) return segments;
+    let offset = 2;
+    while (offset < view.byteLength - 1) {
+      if (view.getUint8(offset) !== 0xFF) break;
+      const marker = view.getUint8(offset + 1);
+      if (marker === 0xD8 || marker === 0xD9) { offset += 2; continue; }
+      if (marker >= 0xD0 && marker <= 0xD7) { offset += 2; continue; }
+      if (offset + 4 > view.byteLength) break;
+      const length = view.getUint16(offset + 2);
+      segments.push({ marker: marker.toString(16).toUpperCase(), offset, length });
+      if (marker === 0xDA) break; // start of scan — image data follows, stop segment walk
+      offset += 2 + length;
+    }
+    return segments;
+  }
+
+  function readIFD(view, tiffStart, ifdOffset, little) {
+    const entries = {};
+    const count = view.getUint16(tiffStart + ifdOffset, little);
+    for (let i = 0; i < count; i++) {
+      const entryOffset = tiffStart + ifdOffset + 2 + i * 12;
+      const tag = view.getUint16(entryOffset, little);
+      const type = view.getUint16(entryOffset + 2, little);
+      const numValues = view.getUint32(entryOffset + 4, little);
+      const typeSizes = { 1:1,2:1,3:2,4:4,5:8,7:1,9:4,10:8 };
+      const size = (typeSizes[type] || 1) * numValues;
+      const valueOffset = size > 4 ? tiffStart + view.getUint32(entryOffset + 8, little) : entryOffset + 8;
+      let value = null;
+      try {
+        if (type === 2) { // ASCII
+          let s = "";
+          for (let j = 0; j < numValues - 1; j++) s += String.fromCharCode(view.getUint8(valueOffset + j));
+          value = s;
+        } else if (type === 3) { // SHORT
+          value = numValues === 1 ? view.getUint16(valueOffset, little) : null;
+        } else if (type === 4) { // LONG
+          value = numValues === 1 ? view.getUint32(valueOffset, little) : null;
+        } else if (type === 5 || type === 10) { // RATIONAL
+          const vals = [];
+          for (let j = 0; j < numValues; j++) {
+            const num = type === 5 ? view.getUint32(valueOffset + j*8, little) : view.getInt32(valueOffset + j*8, little);
+            const den = type === 5 ? view.getUint32(valueOffset + j*8+4, little) : view.getInt32(valueOffset + j*8+4, little);
+            vals.push(den !== 0 ? num/den : 0);
+          }
+          value = numValues === 1 ? vals[0] : vals;
+        }
+      } catch(e) { value = null; }
+      entries[tag] = value;
+    }
+    const nextOffset = view.getUint32(tiffStart + ifdOffset + 2 + count * 12, little);
+    return { entries, nextOffset };
+  }
+
+  function parseEXIF(buf, segments) {
+    const app1 = segments.find(s => s.marker === "E1");
+    const result = { model: null, make: null, dateTime: null, gps: null, gpsAlt: null };
+    if (!app1) return result;
+    const view = new DataView(buf);
+    let p = app1.offset + 4;
+    const header = String.fromCharCode(view.getUint8(p), view.getUint8(p+1), view.getUint8(p+2), view.getUint8(p+3));
+    if (header !== "Exif") return result;
+    const tiffStart = p + 6;
+    const little = view.getUint16(tiffStart) === 0x4949;
+    try {
+      const ifd0Offset = view.getUint32(tiffStart + 4, little);
+      const ifd0 = readIFD(view, tiffStart, ifd0Offset, little);
+      result.make = ifd0.entries[0x010F] || null;
+      result.model = ifd0.entries[0x0110] || null;
+
+      const exifIFDOffset = ifd0.entries[0x8769];
+      if (typeof exifIFDOffset === "number") {
+        const exifIFD = readIFD(view, tiffStart, exifIFDOffset, little);
+        result.dateTime = exifIFD.entries[0x9003] || exifIFD.entries[0x0132] || null;
+      }
+      const gpsIFDOffset = ifd0.entries[0x8825];
+      if (typeof gpsIFDOffset === "number") {
+        const gpsIFD = readIFD(view, tiffStart, gpsIFDOffset, little);
+        const latRef = gpsIFD.entries[1], lat = gpsIFD.entries[2];
+        const lonRef = gpsIFD.entries[3], lon = gpsIFD.entries[4];
+        const alt = gpsIFD.entries[6];
+        if (Array.isArray(lat) && Array.isArray(lon)) {
+          let latDeg = lat[0] + lat[1]/60 + lat[2]/3600;
+          let lonDeg = lon[0] + lon[1]/60 + lon[2]/3600;
+          if (latRef === "S") latDeg = -latDeg;
+          if (lonRef === "W") lonDeg = -lonDeg;
+          result.gps = { lat: latDeg, lon: lonDeg };
+        }
+        if (typeof alt === "number") result.gpsAlt = alt;
+      }
+    } catch(e) {}
+    return result;
+  }
+
+  function extractXMP(buf) {
+    const bytes = new Uint8Array(buf);
+    let text = "";
+    const chunkSize = 1 << 20;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      text += String.fromCharCode.apply(null, bytes.subarray(i, Math.min(i+chunkSize, bytes.length)));
+      if (text.includes("</x:xmpmeta>")) break;
+    }
+    const start = text.indexOf("<x:xmpmeta");
+    const end = text.indexOf("</x:xmpmeta>");
+    if (start === -1 || end === -1) return null;
+    return text.substring(start, end + 12);
+  }
+
+  function extractDJIFields(xmp) {
+    if (!xmp) return {};
+    const fields = {};
+    const patterns = {
+      relativeAltitude: /drone-dji:RelativeAltitude="([^"]+)"/,
+      gpsLatitude: /drone-dji:GpsLatitude="([^"]+)"/,
+      gpsLongitude: /drone-dji:GpsLongitude="([^"]+)"/,
+      gimbalPitch: /drone-dji:GimbalPitchDegree="([^"]+)"/,
+      isThermal: /drone-dji:(IsThermal|ThermalData|DigitalZoomRatio)="([^"]+)"/,
+    };
+    for (const key in patterns) {
+      const m = xmp.match(patterns[key]);
+      if (m) fields[key] = m[1];
+    }
+    fields.hasThermalHint = /thermal/i.test(xmp);
+    return fields;
+  }
+
+  // ---------- IMAGE LOADING ----------
+  function handleFiles(fileList) {
+    const files = Array.from(fileList).filter(f => /image\/jpe?g/.test(f.type) || /\.jpe?g$/i.test(f.name));
+    if (!files.length) return;
+    el("empty-hint").style.display = "none";
+    files.forEach(loadOneFile);
+  }
+
+  function loadOneFile(file) {
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      const buf = e.target.result;
+      const segments = parseJPEGSegments(buf);
+      const exif = parseEXIF(buf, segments);
+      const xmp = extractXMP(buf);
+      const dji = extractDJIFields(xmp);
+
+      const blob = new Blob([buf], { type: "image/jpeg" });
+      const url = URL.createObjectURL(blob);
+      const img = new Image();
+      img.onload = function() {
+        const id = "img_" + Date.now() + "_" + Math.random().toString(36).slice(2,8);
+        const record = {
+          id, file, url, img,
+          name: file.name,
+          date: exif.dateTime || "—",
+          model: exif.model || "Inconnu",
+          gps: exif.gps || (dji.gpsLatitude && dji.gpsLongitude ? { lat: parseFloat(dji.gpsLatitude), lon: parseFloat(dji.gpsLongitude) } : null),
+          alt: dji.relativeAltitude || null,
+          w: img.naturalWidth, h: img.naturalHeight,
+          segments, xmp, dji,
+          maxI: 0, avgI: 0, hotPct: 0,
+        };
+        computeStats(record);
+        images.push(record);
+        renderThumbList();
+        renderBatchTable();
+        updateGlobalButtons();
+        if (!activeId) selectImage(id);
+      };
+      img.src = url;
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  function computeStats(record) {
+    const tmp = document.createElement("canvas");
+    tmp.width = record.w; tmp.height = record.h;
+    const tctx = tmp.getContext("2d", { willReadFrequently: true });
+    tctx.drawImage(record.img, 0, 0);
+    let data;
+    try { data = tctx.getImageData(0, 0, record.w, record.h).data; }
+    catch(e) { record.maxI = 0; record.avgI = 0; record.hotPct = 0; return; }
+    let max = 0, sum = 0, count = 0, hot = 0;
+    const threshold = parseInt(el("threshold").value, 10);
+    for (let i = 0; i < data.length; i += 4) {
+      const lum = 0.299*data[i] + 0.587*data[i+1] + 0.114*data[i+2];
+      if (lum > max) max = lum;
+      sum += lum; count++;
+      if (lum >= threshold) hot++;
+    }
+    record.maxI = Math.round(max);
+    record.avgI = Math.round(sum / count);
+    record.hotPct = +(100 * hot / count).toFixed(1);
+  }
+
+  // ---------- RENDER SIDEBAR / TABLE ----------
+  function renderThumbList() {
+    el("batch-count").textContent = images.length;
+    const list = el("thumb-list");
+    list.innerHTML = "";
+    images.forEach(rec => {
+      const btn = document.createElement("button");
+      btn.className = "thumb-item" + (rec.id === activeId ? " active" : "");
+      btn.innerHTML = `<img src="${rec.url}" alt=""><div class="meta"><div class="name">${escapeHtml(rec.name)}</div><div class="stat">${rec.hotPct > 5 ? '<span class="hotspot-dot"></span>' : ''}max ${rec.maxI} · ${rec.hotPct}% chaud</div></div>`;
+      btn.addEventListener("click", () => selectImage(rec.id));
+      list.appendChild(btn);
+    });
+  }
+
+  function renderBatchTable() {
+    const tbody = el("batch-tbody");
+    if (!images.length) {
+      tbody.innerHTML = '<tr><td colspan="8" style="color:var(--text-dim);">Aucune image importée pour le moment.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = "";
+    images.forEach((rec, i) => {
+      const tr = document.createElement("tr");
+      const gpsStr = rec.gps ? `${rec.gps.lat.toFixed(5)}, ${rec.gps.lon.toFixed(5)}` : "—";
+      tr.innerHTML = `<td>${i+1}</td><td>${escapeHtml(rec.name)}</td><td>${escapeHtml(rec.date)}</td><td>${gpsStr}</td>
+        <td class="num mono">${rec.maxI}</td><td class="num mono">${rec.avgI}</td><td class="num mono">${rec.hotPct}%</td>
+        <td><button class="row-link" data-id="${rec.id}">Voir →</button></td>`;
+      tr.querySelector(".row-link").addEventListener("click", () => selectImage(rec.id));
+      tbody.appendChild(tr);
+    });
+  }
+
+  function updateGlobalButtons() {
+    const has = images.length > 0;
+    el("export-csv").disabled = !has;
+    el("export-pdf").disabled = !has;
+    el("clear-all").disabled = !has;
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  }
+
+  // ---------- SELECTION / VIEWER ----------
+  function selectImage(id) {
+    activeId = id;
+    scale = 1; offsetX = 0; offsetY = 0;
+    clearSelectionReadout();
+    renderThumbList();
+    const rec = images.find(r => r.id === id);
+    if (!rec) return;
+    el("canvas-empty").style.display = "none";
+    el("meta-empty").style.display = "none";
+    el("meta-content").style.display = "block";
+    el("m-name").textContent = rec.name;
+    el("m-date").textContent = rec.date;
+    el("m-model").textContent = rec.model;
+    el("m-gps").textContent = rec.gps ? `${rec.gps.lat.toFixed(5)}, ${rec.gps.lon.toFixed(5)}` : "Non disponible";
+    el("m-alt").textContent = rec.alt ? `${parseFloat(rec.alt).toFixed(1)} m` : "Non disponible";
+    el("m-dim").textContent = `${rec.w} × ${rec.h}px`;
+
+    const calibBadge = el("calib-badge");
+    if (rec.dji.hasThermalHint) {
+      calibBadge.textContent = "Segment thermique détecté — non décodé";
+      calibBadge.className = "badge relative";
+    } else {
+      calibBadge.textContent = "Image non thermique / non calibrée";
+      calibBadge.className = "badge";
+    }
+
+    const diagLines = [];
+    diagLines.push(`Fichier: ${rec.name} (${rec.file.size.toLocaleString("fr-FR")} octets)`);
+    diagLines.push(`Segments JPEG détectés:`);
+    rec.segments.forEach(s => diagLines.push(`  APP/${s.marker}  offset=${s.offset}  taille=${s.length}`));
+    diagLines.push(``);
+    diagLines.push(`Champs DJI (XMP) détectés:`);
+    diagLines.push(JSON.stringify(rec.dji, null, 2));
+    if (!Object.keys(rec.dji).length) diagLines.push("  (aucun champ drone-dji trouvé dans le XMP)");
+    el("diag-pre").textContent = diagLines.join("\n");
+
+    drawActiveImage();
+  }
+
+  function drawActiveImage() {
+    const rec = images.find(r => r.id === activeId);
+    if (!rec) return;
+    const wrapRect = wrap.getBoundingClientRect();
+    const fitScale = Math.min(wrapRect.width / rec.w, wrapRect.height / rec.h) * 0.96;
+    const effScale = fitScale * scale;
+    canvas.width = rec.w; canvas.height = rec.h;
+    canvas.style.width = (rec.w * effScale) + "px";
+    canvas.style.height = (rec.h * effScale) + "px";
+    canvas.style.left = (wrapRect.width/2 - (rec.w*effScale)/2 + offsetX) + "px";
+    canvas.style.top = (wrapRect.height/2 - (rec.h*effScale)/2 + offsetY) + "px";
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    ctx.drawImage(rec.img, 0, 0);
+    imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+    if (el("hotspot-toggle").checked) applyHotspotOverlay();
+    if (rectCurrent) drawRectOverlay();
+  }
+
+  function applyHotspotOverlay() {
+    const threshold = parseInt(el("threshold").value, 10);
+    const d = imageData.data;
+    const overlay = ctx.getImageData(0,0,canvas.width,canvas.height);
+    const od = overlay.data;
+    for (let i = 0; i < d.length; i += 4) {
+      const lum = 0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2];
+      if (lum >= threshold) {
+        od[i] = 232; od[i+1] = 72; od[i+2] = 58; od[i+3] = 150;
+      } else {
+        od[i+3] = 0;
+      }
+    }
+    ctx.putImageData(overlay, 0, 0, 0, 0, canvas.width, canvas.height);
+    // redraw base then overlay composited properly
+    ctx.save();
+    ctx.globalCompositeOperation = "destination-over";
+    const rec = images.find(r => r.id === activeId);
+    ctx.drawImage(rec.img, 0, 0);
+    ctx.restore();
+  }
+
+  // ---------- INTERACTION ----------
+  function canvasToImageCoords(clientX, clientY) {
+    const rect = canvas.getBoundingClientRect();
+    const xRatio = (clientX - rect.left) / rect.width;
+    const yRatio = (clientY - rect.top) / rect.height;
+    return { x: Math.floor(xRatio * canvas.width), y: Math.floor(yRatio * canvas.height) };
+  }
+
+  function pixelLuminance(x, y) {
+    if (!imageData || x < 0 || y < 0 || x >= canvas.width || y >= canvas.height) return null;
+    const idx = (y * canvas.width + x) * 4;
+    const d = imageData.data;
+    return Math.round(0.299*d[idx] + 0.587*d[idx+1] + 0.114*d[idx+2]);
+  }
+
+  wrap.addEventListener("wheel", (e) => {
+    if (!activeId) return;
+    e.preventDefault();
+    const delta = e.deltaY < 0 ? 1.1 : 0.9;
+    scale = Math.min(8, Math.max(0.5, scale * delta));
+    drawActiveImage();
+  }, { passive: false });
+
+  canvas.addEventListener("mousedown", (e) => {
+    if (!activeId) return;
+    if (tool === "rect") {
+      isDrawingRect = true;
+      rectStart = canvasToImageCoords(e.clientX, e.clientY);
+      rectCurrent = { x1: rectStart.x, y1: rectStart.y, x2: rectStart.x, y2: rectStart.y };
+    } else {
+      isPanning = true;
+      panStartX = e.clientX; panStartY = e.clientY;
+      panOrigX = offsetX; panOrigY = offsetY;
+    }
+  });
+
+  window.addEventListener("mousemove", (e) => {
+    if (!activeId) return;
+    if (isDrawingRect) {
+      const p = canvasToImageCoords(e.clientX, e.clientY);
+      rectCurrent.x2 = p.x; rectCurrent.y2 = p.y;
+      drawActiveImage();
+      return;
+    }
+    if (isPanning) {
+      offsetX = panOrigX + (e.clientX - panStartX);
+      offsetY = panOrigY + (e.clientY - panStartY);
+      drawActiveImage();
+      return;
+    }
+    if (tool === "point") {
+      const p = canvasToImageCoords(e.clientX, e.clientY);
+      const lum = pixelLuminance(p.x, p.y);
+      if (lum !== null) {
+        el("probe-readout").classList.add("show");
+        el("probe-val").textContent = lum;
+        el("probe-pos").textContent = `${p.x}, ${p.y}`;
+      }
+    }
+  });
+
+  window.addEventListener("mouseup", () => {
+    isPanning = false;
+    if (isDrawingRect) {
+      isDrawingRect = false;
+      computeRectStats();
+    }
+  });
+
+  function drawRectOverlay() {
+    if (!rectCurrent) return;
+    const rec = images.find(r => r.id === activeId);
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    ctx.drawImage(rec.img, 0, 0);
+    if (el("hotspot-toggle").checked) applyHotspotOverlay();
+    ctx.save();
+    ctx.strokeStyle = "#E8914A";
+    ctx.lineWidth = Math.max(2, canvas.width / 400);
+    const x = Math.min(rectCurrent.x1, rectCurrent.x2);
+    const y = Math.min(rectCurrent.y1, rectCurrent.y2);
+    const w = Math.abs(rectCurrent.x2 - rectCurrent.x1);
+    const h = Math.abs(rectCurrent.y2 - rectCurrent.y1);
+    ctx.strokeRect(x, y, w, h);
+    ctx.restore();
+  }
+
+  function computeRectStats() {
+    if (!rectCurrent || !imageData) return;
+    const x = Math.max(0, Math.min(rectCurrent.x1, rectCurrent.x2));
+    const y = Math.max(0, Math.min(rectCurrent.y1, rectCurrent.y2));
+    const x2 = Math.min(canvas.width, Math.max(rectCurrent.x1, rectCurrent.x2));
+    const y2 = Math.min(canvas.height, Math.max(rectCurrent.y1, rectCurrent.y2));
+    const threshold = parseInt(el("threshold").value, 10);
+    let min = 255, max = 0, sum = 0, count = 0, hot = 0;
+    const d = imageData.data;
+    for (let py = y; py < y2; py++) {
+      for (let px = x; px < x2; px++) {
+        const idx = (py * canvas.width + px) * 4;
+        const lum = 0.299*d[idx] + 0.587*d[idx+1] + 0.114*d[idx+2];
+        if (lum < min) min = lum;
+        if (lum > max) max = lum;
+        sum += lum; count++;
+        if (lum >= threshold) hot++;
+      }
+    }
+    if (count === 0) return;
+    el("selection-section").style.display = "block";
+    el("sel-min").textContent = Math.round(min);
+    el("sel-max").textContent = Math.round(max);
+    el("sel-avg").textContent = Math.round(sum / count);
+    el("sel-hot").textContent = `${hot} px (${(100*hot/count).toFixed(1)}%)`;
+  }
+
+  function clearSelectionReadout() {
+    rectCurrent = null;
+    el("selection-section").style.display = "none";
+    el("probe-readout").classList.remove("show");
+  }
+
+  // ---------- TOOLBAR EVENTS ----------
+  document.querySelectorAll(".tool-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".tool-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      tool = btn.dataset.tool;
+    });
+  });
+
+  el("threshold").addEventListener("input", (e) => {
+    el("threshold-val").textContent = e.target.value;
+    if (activeId) drawActiveImage();
+  });
+  el("hotspot-toggle").addEventListener("change", () => { if (activeId) drawActiveImage(); });
+  el("zoom-reset").addEventListener("click", () => { scale = 1; offsetX = 0; offsetY = 0; if (activeId) drawActiveImage(); });
+
+  el("file-input").addEventListener("change", (e) => handleFiles(e.target.files));
+  wrap.addEventListener("dragover", (e) => e.preventDefault());
+  wrap.addEventListener("drop", (e) => { e.preventDefault(); handleFiles(e.dataTransfer.files); });
+  document.body.addEventListener("dragover", (e) => e.preventDefault());
+  document.body.addEventListener("drop", (e) => { e.preventDefault(); if (e.target === document.body) handleFiles(e.dataTransfer.files); });
+
+  el("clear-all").addEventListener("click", () => {
+    images.length = 0; activeId = null;
+    renderThumbList(); renderBatchTable(); updateGlobalButtons();
+    el("empty-hint").style.display = "block";
+    el("canvas-empty").style.display = "block";
+    el("meta-empty").style.display = "block";
+    el("meta-content").style.display = "none";
+    clearSelectionReadout();
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+  });
+
+  window.addEventListener("resize", () => { if (activeId) drawActiveImage(); });
+
+  // ---------- EXPORTS ----------
+  el("export-csv").addEventListener("click", () => {
+    const header = ["Fichier","Date","GPS_lat","GPS_lon","Altitude_m","Intensite_max","Intensite_moy","Points_chauds_pct"];
+    const rows = images.map(r => [
+      r.name, r.date,
+      r.gps ? r.gps.lat.toFixed(6) : "", r.gps ? r.gps.lon.toFixed(6) : "",
+      r.alt || "", r.maxI, r.avgI, r.hotPct
+    ]);
+    const csv = [header, ...rows].map(row => row.map(v => `"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
+    downloadBlob(new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" }), "inspection-thermique.csv");
+  });
+
+  el("export-pdf").addEventListener("click", async () => {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit: "mm", format: "a4" });
+    const pageW = 210, margin = 16;
+
+    doc.setFontSize(18);
+    doc.text("Rapport d'inspection thermique", margin, 22);
+    doc.setFontSize(10);
+    doc.setTextColor(120);
+    doc.text(`Généré le ${new Date().toLocaleDateString("fr-FR")} — ${images.length} image(s) — mode intensité relative (non calibré)`, margin, 29);
+    doc.setTextColor(0);
+
+    for (let i = 0; i < images.length; i++) {
+      const rec = images[i];
+      if (i > 0) doc.addPage();
+      else doc.text("", margin, 36);
+      let y = i === 0 ? 40 : 20;
+
+      doc.setFontSize(13);
+      doc.text(rec.name, margin, y); y += 7;
+      doc.setFontSize(9);
+      doc.setTextColor(100);
+      doc.text(`Date: ${rec.date}`, margin, y); y += 5;
+      doc.text(`GPS: ${rec.gps ? rec.gps.lat.toFixed(5) + ", " + rec.gps.lon.toFixed(5) : "non disponible"}`, margin, y); y += 5;
+      doc.text(`Altitude relative: ${rec.alt ? parseFloat(rec.alt).toFixed(1) + " m" : "non disponible"}`, margin, y); y += 8;
+      doc.setTextColor(0);
+
+      const tmp = document.createElement("canvas");
+      tmp.width = rec.w; tmp.height = rec.h;
+      tmp.getContext("2d").drawImage(rec.img, 0, 0);
+      const imgData = tmp.toDataURL("image/jpeg", 0.85);
+      const imgW = pageW - margin*2;
+      const imgH = imgW * (rec.h / rec.w);
+      doc.addImage(imgData, "JPEG", margin, y, imgW, Math.min(imgH, 140));
+      y += Math.min(imgH, 140) + 8;
+
+      doc.setFontSize(10);
+      doc.text(`Intensité max: ${rec.maxI}/255   Intensité moyenne: ${rec.avgI}/255   Points chauds: ${rec.hotPct}%`, margin, y);
+    }
+    doc.save("rapport-inspection-thermique.pdf");
+  });
+})();
+</script>
+
+<script>
+(function(){
+  "use strict";
+  const el = (id) => document.getElementById(id);
+
+  // ---------- TABS ----------
+  document.querySelectorAll(".tab-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+      document.querySelectorAll(".tab-view").forEach(v => v.classList.remove("active"));
+      btn.classList.add("active");
+      el("tab-" + btn.dataset.tab).classList.add("active");
+      Object.keys(orthoState).forEach(resizeOrthoCanvas);
+      Object.keys(modelState).forEach(resizeModelViewer);
+    });
+  });
+
+  // ---------- ORTHO 2D VIEWER ----------
+  const orthoState = {
+    rgb: { source: null, w: 0, h: 0, scale: 1, offsetX: 0, offsetY: 0, dragging: false, dataURL: null },
+    ir:  { source: null, w: 0, h: 0, scale: 1, offsetX: 0, offsetY: 0, dragging: false, dataURL: null },
+  };
+
+  async function decodeOrthoFile(file) {
+    const isTiff = /\.tiff?$/i.test(file.name) || file.type === "image/tiff";
+    if (isTiff) {
+      if (typeof GeoTIFF === "undefined") throw new Error("Lecteur GeoTIFF indisponible");
+      const buf = await file.arrayBuffer();
+      const tiff = await GeoTIFF.fromArrayBuffer(buf);
+      const image = await tiff.getImage();
+      const w = image.getWidth(), h = image.getHeight();
+      const MAX = 4000;
+      const scaleDown = Math.min(1, MAX / Math.max(w, h));
+      const outW = Math.max(1, Math.round(w * scaleDown));
+      const outH = Math.max(1, Math.round(h * scaleDown));
+      const rasters = await image.readRasters({ width: outW, height: outH });
+      const bands = rasters.length;
+      const canvas = document.createElement("canvas");
+      canvas.width = outW; canvas.height = outH;
+      const cctx = canvas.getContext("2d");
+      const imgData = cctx.createImageData(outW, outH);
+      const d = imgData.data;
+      for (let i = 0; i < outW * outH; i++) {
+        if (bands >= 3) {
+          d[i*4] = rasters[0][i]; d[i*4+1] = rasters[1][i]; d[i*4+2] = rasters[2][i];
+          d[i*4+3] = bands >= 4 ? rasters[3][i] : 255;
+        } else {
+          const v = rasters[0][i];
+          d[i*4] = v; d[i*4+1] = v; d[i*4+2] = v; d[i*4+3] = 255;
+        }
+      }
+      cctx.putImageData(imgData, 0, 0);
+      return { source: canvas, w: outW, h: outH, dataURL: canvas.toDataURL("image/png") };
+    }
+    const url = URL.createObjectURL(file);
+    const img = await new Promise((resolve, reject) => {
+      const im = new Image();
+      im.onload = () => resolve(im);
+      im.onerror = reject;
+      im.src = url;
+    });
+    return { source: img, w: img.naturalWidth, h: img.naturalHeight, dataURL: url };
+  }
+
+  function setupOrthoSlot(slot) {
+    const fileInput = el("ortho-file-" + slot);
+    const drop = el("ortho-drop-" + slot);
+    const canvas = el("ortho-canvas-" + slot);
+    const ctx = canvas.getContext("2d");
+    const nameEl = el("ortho-" + slot + "-name");
+    const dimEl = el("ortho-" + slot + "-dim");
+    const resetBtn = el("ortho-" + slot + "-reset");
+    const emptyEl = drop.querySelector(".ortho-empty");
+
+    async function onFiles(files) {
+      const file = files[0];
+      if (!file) return;
+      emptyEl.innerHTML = "Chargement…";
+      try {
+        const { source, w, h, dataURL } = await decodeOrthoFile(file);
+        const st = orthoState[slot];
+        st.source = source; st.w = w; st.h = h; st.scale = 1; st.offsetX = 0; st.offsetY = 0; st.dataURL = dataURL;
+        nameEl.textContent = file.name;
+        dimEl.textContent = `${w} × ${h}px`;
+        emptyEl.style.display = "none";
+        canvas.style.display = "block";
+        resetBtn.style.display = "inline";
+        drawOrtho(slot);
+        maybeEnableCompare();
+      } catch(err) {
+        emptyEl.innerHTML = "Erreur de lecture — format non pris en charge.";
+        console.error(err);
+      }
+    }
+
+    fileInput.addEventListener("change", (e) => onFiles(e.target.files));
+    drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("dragging"); });
+    drop.addEventListener("dragleave", () => drop.classList.remove("dragging"));
+    drop.addEventListener("drop", (e) => { e.preventDefault(); drop.classList.remove("dragging"); onFiles(e.dataTransfer.files); });
+
+    let panStart = null, origOffset = null;
+    canvas.addEventListener("pointerdown", (e) => {
+      canvas.setPointerCapture(e.pointerId);
+      panStart = { x: e.clientX, y: e.clientY };
+      origOffset = { x: orthoState[slot].offsetX, y: orthoState[slot].offsetY };
+    });
+    canvas.addEventListener("pointermove", (e) => {
+      if (!panStart) return;
+      const st = orthoState[slot];
+      st.offsetX = origOffset.x + (e.clientX - panStart.x);
+      st.offsetY = origOffset.y + (e.clientY - panStart.y);
+      drawOrtho(slot);
+    });
+    canvas.addEventListener("pointerup", () => { panStart = null; });
+    drop.addEventListener("wheel", (e) => {
+      if (!orthoState[slot].source) return;
+      e.preventDefault();
+      const st = orthoState[slot];
+      st.scale = Math.min(10, Math.max(0.3, st.scale * (e.deltaY < 0 ? 1.1 : 0.9)));
+      drawOrtho(slot);
+    }, { passive: false });
+
+    resetBtn.addEventListener("click", () => {
+      const st = orthoState[slot];
+      st.scale = 1; st.offsetX = 0; st.offsetY = 0;
+      drawOrtho(slot);
+    });
+  }
+
+  function drawOrtho(slot) {
+    const st = orthoState[slot];
+    if (!st.source) return;
+    const canvas = el("ortho-canvas-" + slot);
+    const drop = el("ortho-drop-" + slot);
+    const rect = drop.getBoundingClientRect();
+    canvas.width = rect.width; canvas.height = rect.height;
+    const ctx = canvas.getContext("2d");
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    const fit = Math.min(canvas.width / st.w, canvas.height / st.h) * 0.96;
+    const eff = fit * st.scale;
+    const dw = st.w * eff, dh = st.h * eff;
+    const dx = canvas.width/2 - dw/2 + st.offsetX;
+    const dy = canvas.height/2 - dh/2 + st.offsetY;
+    ctx.drawImage(st.source, dx, dy, dw, dh);
+  }
+
+  function resizeOrthoCanvas(slot) {
+    if (orthoState[slot] && orthoState[slot].source) drawOrtho(slot);
+  }
+
+  setupOrthoSlot("rgb");
+  setupOrthoSlot("ir");
+
+  // ---------- COMPARE SLIDER ----------
+  function maybeEnableCompare() {
+    const ready = orthoState.rgb.source && orthoState.ir.source;
+    el("compare-mode-toggle").disabled = !ready;
+  }
+
+  el("compare-mode-toggle").addEventListener("change", (e) => {
+    const wrap = el("compare-wrap");
+    const pair = el("ortho-pair");
+    if (e.target.checked) {
+      wrap.classList.add("active");
+      pair.style.display = "none";
+      el("compare-ir-full").src = orthoState.ir.dataURL;
+      el("compare-rgb-clip").src = orthoState.rgb.dataURL;
+      requestAnimationFrame(syncCompareWidth);
+    } else {
+      wrap.classList.remove("active");
+      pair.style.display = "grid";
+    }
+  });
+
+  function syncCompareWidth() {
+    const wrap = el("compare-wrap");
+    wrap.style.setProperty("--cw", wrap.clientWidth + "px");
+  }
+  window.addEventListener("resize", () => { if (el("compare-wrap").classList.contains("active")) syncCompareWidth(); });
+
+  let handleDragging = false;
+  el("compare-handle").addEventListener("pointerdown", (e) => {
+    handleDragging = true;
+    el("compare-handle").setPointerCapture(e.pointerId);
+  });
+  el("compare-handle").addEventListener("pointerup", () => { handleDragging = false; });
+  el("compare-wrap").addEventListener("pointermove", (e) => {
+    if (!handleDragging) return;
+    const rect = el("compare-wrap").getBoundingClientRect();
+    let pct = ((e.clientX - rect.left) / rect.width) * 100;
+    pct = Math.max(0, Math.min(100, pct));
+    el("compare-handle").style.left = pct + "%";
+    el("compare-clip").style.width = pct + "%";
+  });
+
+  // ---------- 3D MODEL VIEWER ----------
+  const modelState = {};
+  const hasThree = typeof THREE !== "undefined";
+
+  function initModelViewer(slot) {
+    if (modelState[slot] || !hasThree) return;
+    const wrap = el("model-canvas-wrap-" + slot);
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0D1116);
+    const camera = new THREE.PerspectiveCamera(50, wrap.clientWidth / Math.max(1,wrap.clientHeight), 0.01, 100000);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(wrap.clientWidth, wrap.clientHeight);
+    renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+    wrap.insertBefore(renderer.domElement, wrap.firstChild);
+
+    scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+    const dir = new THREE.DirectionalLight(0xffffff, 0.8);
+    dir.position.set(5, 10, 7);
+    scene.add(dir);
+    const grid = new THREE.GridHelper(10, 20, 0x2E3946, 0x1A212B);
+    scene.add(grid);
+
+    const controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    camera.position.set(3, 3, 3);
+    controls.update();
+
+    modelState[slot] = { scene, camera, renderer, controls, object: null, sphere: null, grid };
+  }
+
+  function resizeModelViewer(slot) {
+    const st = modelState[slot];
+    if (!st) return;
+    const wrap = el("model-canvas-wrap-" + slot);
+    const w = wrap.clientWidth, h = Math.max(1, wrap.clientHeight);
+    st.camera.aspect = w / h;
+    st.camera.updateProjectionMatrix();
+    st.renderer.setSize(w, h);
+  }
+
+  function frameObject(slot) {
+    const st = modelState[slot];
+    const box = new THREE.Box3().setFromObject(st.object);
+    const center = box.getCenter(new THREE.Vector3());
+    const sphere = box.getBoundingSphere(new THREE.Sphere());
+    st.object.position.sub(center);
+    const dist = Math.max(sphere.radius * 2.4, 0.5);
+    st.camera.position.set(dist, dist * 0.8, dist);
+    st.camera.near = dist / 1000; st.camera.far = dist * 1000;
+    st.camera.updateProjectionMatrix();
+    st.controls.target.set(0, 0, 0);
+    st.controls.update();
+    st.grid.scale.setScalar(Math.max(1, sphere.radius / 5));
+    st.sphere = sphere;
+  }
+
+  function loadModelFiles(slot, fileList) {
+    initModelViewer(slot);
+    const files = Array.from(fileList);
+    const fileMap = {};
+    files.forEach(f => { fileMap[f.name] = URL.createObjectURL(f); });
+    const glb = files.find(f => /\.(glb|gltf)$/i.test(f.name));
+    const objF = files.find(f => /\.obj$/i.test(f.name));
+    const mtlF = files.find(f => /\.mtl$/i.test(f.name));
+    if (!glb && !objF) { alert("Sélectionnez un fichier .glb/.gltf ou .obj (avec son .mtl et ses textures)."); return; }
+
+    el("model-loading-" + slot).classList.add("show");
+    el("model-" + slot + "-name").textContent = (glb || objF).name;
+
+    const manager = new THREE.LoadingManager();
+    manager.setURLModifier((url) => {
+      const base = url.split("/").pop().split("\\").pop().split("?")[0];
+      return fileMap[base] || url;
+    });
+
+    function onLoaded(object3d) {
+      const st = modelState[slot];
+      if (st.object) st.scene.remove(st.object);
+      st.object = object3d;
+      st.scene.add(object3d);
+      frameObject(slot);
+      el("model-loading-" + slot).classList.remove("show");
+    }
+    function onError(err) {
+      console.error(err);
+      el("model-loading-" + slot).classList.remove("show");
+      alert("Échec du chargement du modèle 3D. Vérifiez que tous les fichiers nécessaires (texture, .mtl) sont sélectionnés ensemble.");
+    }
+
+    if (glb) {
+      new THREE.GLTFLoader(manager).load(fileMap[glb.name], (gltf) => onLoaded(gltf.scene), undefined, onError);
+    } else if (mtlF) {
+      new THREE.MTLLoader(manager).load(fileMap[mtlF.name], (materials) => {
+        materials.preload();
+        new THREE.OBJLoader(manager).setMaterials(materials).load(fileMap[objF.name], onLoaded, undefined, onError);
+      }, undefined, onError);
+    } else {
+      new THREE.OBJLoader(manager).load(fileMap[objF.name], onLoaded, undefined, onError);
+    }
+  }
+
+  ["rgb","ir"].forEach(slot => {
+    el("model-file-" + slot).addEventListener("change", (e) => loadModelFiles(slot, e.target.files));
+    document.querySelector(`.model-toolbar button[data-action="wireframe"][data-slot="${slot}"]`).addEventListener("click", () => {
+      const st = modelState[slot];
+      if (!st || !st.object) return;
+      st.object.traverse(node => {
+        if (node.isMesh && node.material) {
+          const mats = Array.isArray(node.material) ? node.material : [node.material];
+          mats.forEach(m => { m.wireframe = !m.wireframe; });
+        }
+      });
+    });
+    document.querySelector(`.model-toolbar button[data-action="reset"][data-slot="${slot}"]`).addEventListener("click", () => {
+      if (modelState[slot] && modelState[slot].object) frameObject(slot);
+    });
+  });
+
+  window.addEventListener("resize", () => { ["rgb","ir"].forEach(resizeModelViewer); });
+
+  (function animate(){
+    requestAnimationFrame(animate);
+    Object.keys(modelState).forEach(slot => {
+      const st = modelState[slot];
+      st.controls.update();
+      st.renderer.render(st.scene, st.camera);
+    });
+  })();
+})();
+</script>
