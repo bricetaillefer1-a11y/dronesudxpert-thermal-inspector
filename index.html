@@ -8,6 +8,8 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/OBJLoader.js"></script>
@@ -159,6 +161,30 @@
   .batch-section{border-top:1px solid var(--border);background:var(--surface);padding:16px 20px;}
   .batch-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:10px;}
   .batch-head h2{font-size:0.95rem;}
+  .batch-controls{display:flex;gap:18px;align-items:center;flex-wrap:wrap;font-size:0.82rem;color:var(--text-dim);}
+  .batch-controls select{background:var(--surface-2);color:var(--text);border:1px solid var(--border);border-radius:5px;padding:4px 8px;font-size:0.8rem;}
+  #import-progress{display:flex;align-items:center;gap:12px;margin-bottom:14px;}
+  .progress-track{flex:1;height:8px;background:var(--surface-2);border-radius:4px;overflow:hidden;}
+  .progress-bar{height:100%;width:0;background:var(--accent);transition:width .2s ease;}
+  .anomaly-tag{font-size:0.75rem;font-weight:700;padding:3px 9px;border-radius:12px;}
+  .anomaly-tag.yes{color:var(--hot);background:#3A1512;border:1px solid #5A2320;}
+  .anomaly-tag.no{color:var(--text-dim);background:var(--surface-2);border:1px solid var(--border);}
+
+  /* MAP TAB */
+  .map-wrap{display:flex;flex:1;min-height:0;}
+  .map-side{width:280px;flex-shrink:0;padding:20px;border-right:1px solid var(--border);background:var(--surface);overflow-y:auto;}
+  .map-side h2{font-size:1.1rem;margin-bottom:10px;}
+  .map-side .hint{font-size:0.82rem;color:var(--text-dim);line-height:1.6;margin-bottom:18px;}
+  .map-stats{display:flex;gap:12px;}
+  .map-stat{flex:1;border:1px solid var(--border);border-radius:8px;padding:12px;text-align:center;}
+  .map-stat .num{font-family:'IBM Plex Mono',monospace;font-size:1.5rem;font-weight:700;}
+  .map-stat .label{font-size:0.7rem;color:var(--text-dim);margin-top:2px;}
+  #map-container{flex:1;min-width:0;}
+  .map-popup{font-family:'IBM Plex Sans',sans-serif;min-width:180px;}
+  .map-popup img{width:100%;border-radius:4px;margin-bottom:6px;}
+  .map-popup .name{font-weight:700;font-size:0.85rem;margin-bottom:4px;word-break:break-all;}
+  .map-popup .stat{font-size:0.8rem;color:#444;margin-bottom:6px;}
+  .map-popup button{width:100%;padding:6px;border-radius:5px;border:none;background:var(--accent);color:#1A1208;font-weight:700;font-size:0.8rem;cursor:pointer;}
   table{width:100%;border-collapse:collapse;font-size:0.82rem;}
   .table-wrap{overflow-x:auto;}
   th,td{padding:8px 12px;text-align:left;white-space:nowrap;}
@@ -279,6 +305,7 @@
 
   <div class="tabbar">
     <button class="tab-btn active" data-tab="thermal">Analyse thermique</button>
+    <button class="tab-btn" data-tab="map">Carte des anomalies</button>
     <button class="tab-btn" data-tab="ortho">Orthophotos &amp; Modèles 3D</button>
   </div>
 
@@ -361,20 +388,49 @@
   <div class="batch-section">
     <div class="batch-head">
       <h2>Récapitulatif du lot</h2>
-      <span style="font-size:0.78rem;color:var(--text-dim);">Toutes les valeurs sont relatives (0–255), non calibrées en °C</span>
+      <div class="batch-controls">
+        <label><input type="checkbox" id="filter-anomaly"> Afficher uniquement les anomalies</label>
+        <label>Trier par
+          <select id="sort-select">
+            <option value="import">Ordre d'import</option>
+            <option value="severity">Sévérité (le plus chaud/anormal d'abord)</option>
+            <option value="name">Nom de fichier</option>
+            <option value="date">Date</option>
+          </select>
+        </label>
+      </div>
+    </div>
+    <div id="import-progress" style="display:none;">
+      <div class="progress-track"><div class="progress-bar" id="import-progress-bar"></div></div>
+      <span id="import-progress-text" class="mono"></span>
     </div>
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>#</th><th>Fichier</th><th>Date</th><th>GPS</th><th class="num">Intensité max</th><th class="num">Intensité moy.</th><th class="num">Points chauds</th><th></th></tr>
+          <tr><th>#</th><th>Fichier</th><th>Date</th><th>GPS</th><th class="num">Max</th><th class="num">Moyenne</th><th class="num">Points chauds</th><th>Anomalie</th><th></th></tr>
         </thead>
         <tbody id="batch-tbody">
-          <tr><td colspan="8" style="color:var(--text-dim);">Aucune image importée pour le moment.</td></tr>
+          <tr><td colspan="9" style="color:var(--text-dim);">Aucune image importée pour le moment.</td></tr>
         </tbody>
       </table>
     </div>
   </div>
   </div><!-- /tab-thermal -->
+
+  <div class="tab-view" id="tab-map">
+    <div class="map-wrap">
+      <div class="map-side">
+        <h2>Carte des anomalies</h2>
+        <p class="hint">Chaque point est une photo géolocalisée. <span style="color:var(--hot);font-weight:700;">Rouge</span> = anomalie thermique probable, <span style="color:var(--text-dim);font-weight:700;">gris</span> = normal. Cliquez un point pour ouvrir la photo.</p>
+        <div class="map-stats">
+          <div class="map-stat"><div class="num" id="map-stat-total">0</div><div class="label">Photos géolocalisées</div></div>
+          <div class="map-stat"><div class="num" style="color:var(--hot);" id="map-stat-anomaly">0</div><div class="label">Anomalies probables</div></div>
+        </div>
+        <div id="map-no-gps" style="display:none;font-size:0.85rem;color:var(--text-dim);margin-top:14px;">Aucune des photos importées ne contient de coordonnées GPS exploitables.</div>
+      </div>
+      <div id="map-container"></div>
+    </div>
+  </div><!-- /tab-map -->
 
   <div class="tab-view" id="tab-ortho">
     <div class="ortho-wrap">
@@ -464,6 +520,10 @@
   let isPanning = false, panStartX = 0, panStartY = 0, panOrigX = 0, panOrigY = 0;
   let isDrawingRect = false, rectStart = null, rectCurrent = null;
   let imageData = null; // current ImageData of active image at natural resolution
+  // Lazily (re)built for whichever single image is currently on screen — never kept for
+  // the whole batch, so a batch of hundreds of photos stays light. See loadActiveDecoded().
+  let activeDecoded = null; // { img, url, tempGrid|null }
+  let activeDecodeToken = 0; // guards against a stale async decode overwriting a newer selection
 
   const el = (id) => document.getElementById(id);
   const canvas = el("main-canvas");
@@ -692,9 +752,9 @@
   }
 
   function getPixelReading(rec, x, y) {
-    if (rec.thermal && rec.thermal.tempGrid) {
+    if (activeDecoded && activeDecoded.tempGrid) {
       if (x < 0 || y < 0 || x >= rec.w || y >= rec.h) return null;
-      return { value: rec.thermal.tempGrid[y*rec.w + x], unit: "°C", isTemp: true };
+      return { value: activeDecoded.tempGrid[y*rec.w + x], unit: "°C", isTemp: true };
     }
     if (!imageData || x < 0 || y < 0 || x >= canvas.width || y >= canvas.height) return null;
     const idx = (y * canvas.width + x) * 4;
@@ -710,7 +770,7 @@
     return map[ext] || null;
   }
 
-  function handleFiles(fileList) {
+  async function handleFiles(fileList) {
     const all = Array.from(fileList);
     const accepted = [], rejected = [];
     all.forEach(f => (detectImageType(f) ? accepted : rejected).push(f));
@@ -719,86 +779,151 @@
     }
     if (!accepted.length) return;
     el("empty-hint").style.display = "none";
-    accepted.forEach(loadOneFile);
-  }
 
-  function loadOneFile(file) {
-    const mimeType = detectImageType(file);
-    const reader = new FileReader();
-    reader.onerror = () => showToast(`Échec de lecture du fichier "${file.name}".`);
-    reader.onload = function(e) {
-      const buf = e.target.result;
-      let segments = [], exif = { model: null, make: null, dateTime: null, gps: null, gpsAlt: null }, dji = {}, xmp = null, thermal = null;
+    const showProgress = accepted.length > 3;
+    if (showProgress) { el("import-progress").style.display = "flex"; }
+    let done = 0;
+    for (const file of accepted) {
       try {
-        segments = parseJPEGSegments(buf);
-        exif = parseEXIF(buf, segments);
-        xmp = extractXMP(buf);
-        dji = extractDJIFields(xmp);
-        thermal = extractThermalCalibration(buf, segments);
+        await loadOneFile(file);
       } catch (err) {
-        console.error("Lecture des métadonnées échouée pour " + file.name, err);
-        showToast(`Métadonnées illisibles pour "${file.name}" — la photo s'affiche quand même, sans ces infos.`);
+        console.error("Import échoué pour " + file.name, err);
+        showToast(`Échec de l'import pour "${file.name}".`);
       }
-
-      const blob = new Blob([buf], { type: mimeType });
-      const url = URL.createObjectURL(blob);
-      const img = new Image();
-      img.onerror = () => showToast(`Impossible d'afficher "${file.name}" — format non supporté par ce navigateur (HEIC notamment).`);
-      img.onload = function() {
-        const id = "img_" + Date.now() + "_" + Math.random().toString(36).slice(2,8);
-        const record = {
-          id, file, url, img,
-          name: file.name,
-          date: exif.dateTime || "—",
-          model: exif.model || "Inconnu",
-          gps: exif.gps || (dji.gpsLatitude && dji.gpsLongitude ? { lat: parseFloat(dji.gpsLatitude), lon: parseFloat(dji.gpsLongitude) } : null),
-          alt: dji.relativeAltitude || null,
-          w: img.naturalWidth, h: img.naturalHeight,
-          segments, xmp, dji, thermal,
-          maxI: 0, avgI: 0, hotPct: 0, hotThreshold: null,
-        };
-        if (thermal) {
-          thermal.tempGrid = buildTempGrid(thermal, record.w, record.h);
-          const ambient = thermal.params && typeof thermal.params.ambient_temp === "number" ? thermal.params.ambient_temp : null;
-          record.hotThreshold = ambient !== null ? +(ambient + 10).toFixed(1) : +(thermal.tLow + 0.75*(thermal.tHigh - thermal.tLow)).toFixed(1);
-        }
-        computeStats(record);
-        images.push(record);
-        renderThumbList();
-        renderBatchTable();
-        updateGlobalButtons();
-        if (!activeId) selectImage(id);
-      };
-      img.src = url;
-    };
-    reader.readAsArrayBuffer(file);
+      done++;
+      if (showProgress) {
+        el("import-progress-bar").style.width = Math.round(100*done/accepted.length) + "%";
+        el("import-progress-text").textContent = `Import ${done} / ${accepted.length}…`;
+      }
+      renderThumbList();
+      renderBatchTable();
+      updateGlobalButtons();
+    }
+    if (showProgress) { el("import-progress").style.display = "none"; }
   }
 
-  function computeStats(record) {
-    if (record.thermal && record.thermal.tempGrid) {
-      const grid = record.thermal.tempGrid;
-      const threshold = record.hotThreshold;
-      let max = -Infinity, sum = 0, hot = 0;
-      for (let i = 0; i < grid.length; i++) {
-        const t = grid[i];
-        if (t > max) max = t;
-        sum += t;
-        if (t >= threshold) hot++;
-      }
-      record.maxI = +max.toFixed(1);
-      record.avgI = +(sum / grid.length).toFixed(1);
-      record.hotPct = +(100 * hot / grid.length).toFixed(1);
-      return;
+  // A lightweight, short-lived decode used only to compute stats/anomaly/thumbnail at import time.
+  // The full-resolution Image and any upsampled temperature grid are NOT kept in the record —
+  // see selectImage()/activeDecoded, which lazily (re)decodes only the one image being viewed.
+  // This keeps memory bounded when importing hundreds of photos (a real solar-field batch).
+  function loadOneFile(file) {
+    return new Promise((resolve, reject) => {
+      const mimeType = detectImageType(file);
+      const reader = new FileReader();
+      reader.onerror = () => { showToast(`Échec de lecture du fichier "${file.name}".`); reject(reader.error); };
+      reader.onload = function(e) {
+        const buf = e.target.result;
+        let segments = [], exif = { model: null, make: null, dateTime: null, gps: null, gpsAlt: null }, dji = {}, xmp = null, thermal = null;
+        try {
+          segments = parseJPEGSegments(buf);
+          exif = parseEXIF(buf, segments);
+          xmp = extractXMP(buf);
+          dji = extractDJIFields(xmp);
+          thermal = extractThermalCalibration(buf, segments);
+        } catch (err) {
+          console.error("Lecture des métadonnées échouée pour " + file.name, err);
+          showToast(`Métadonnées illisibles pour "${file.name}" — la photo s'affiche quand même, sans ces infos.`);
+        }
+
+        const tempUrl = URL.createObjectURL(new Blob([buf], { type: mimeType }));
+        const img = new Image();
+        img.onerror = () => { URL.revokeObjectURL(tempUrl); showToast(`Impossible d'afficher "${file.name}" — format non supporté (HEIC notamment).`); reject(new Error("decode failed")); };
+        img.onload = function() {
+          const id = "img_" + Date.now() + "_" + Math.random().toString(36).slice(2,8);
+          const record = {
+            id, file,
+            name: file.name,
+            date: exif.dateTime || "—",
+            model: exif.model || "Inconnu",
+            gps: exif.gps || (dji.gpsLatitude && dji.gpsLongitude ? { lat: parseFloat(dji.gpsLatitude), lon: parseFloat(dji.gpsLongitude) } : null),
+            alt: dji.relativeAltitude || null,
+            w: img.naturalWidth, h: img.naturalHeight,
+            segments, xmp, dji, thermal,
+            thumb: makeThumbnail(img),
+            maxI: 0, avgI: 0, hotPct: 0, hotThreshold: null,
+            anomaly: null,
+          };
+          if (thermal) {
+            const ambient = thermal.params && typeof thermal.params.ambient_temp === "number" ? thermal.params.ambient_temp : null;
+            record.hotThreshold = ambient !== null ? +(ambient + 10).toFixed(1) : +(thermal.tLow + 0.75*(thermal.tHigh - thermal.tLow)).toFixed(1);
+            computeThermalStats(record);
+            record.anomaly = computeThermalAnomaly(thermal);
+          } else {
+            computeLuminanceStats(record, img);
+          }
+          URL.revokeObjectURL(tempUrl);
+          images.push(record);
+          if (!activeId) selectImage(id);
+          resolve(record);
+        };
+        img.src = tempUrl;
+      };
+      reader.readAsArrayBuffer(file);
+    });
+  }
+
+  function makeThumbnail(img) {
+    const maxW = 200;
+    const scale = Math.min(1, maxW / img.naturalWidth);
+    const w = Math.max(1, Math.round(img.naturalWidth * scale));
+    const h = Math.max(1, Math.round(img.naturalHeight * scale));
+    const c = document.createElement("canvas");
+    c.width = w; c.height = h;
+    c.getContext("2d").drawImage(img, 0, 0, w, h);
+    return c.toDataURL("image/jpeg", 0.6);
+  }
+
+  function computeThermalStats(record) {
+    const raw = record.thermal.raw, toTemp = record.thermal.toTemp;
+    const threshRaw = record.thermal.rawMin + (record.hotThreshold - record.thermal.tLow) * (record.thermal.rawMax - record.thermal.rawMin) / (record.thermal.tHigh - record.thermal.tLow);
+    let max = -Infinity, sum = 0, hot = 0;
+    for (let i = 0; i < raw.length; i++) {
+      const v = raw[i];
+      if (v > max) max = v;
+      sum += v;
+      if (v >= threshRaw) hot++;
     }
+    record.maxI = +toTemp(max).toFixed(1);
+    record.avgI = +toTemp(sum / raw.length).toFixed(1);
+    record.hotPct = +(100 * hot / raw.length).toFixed(1);
+  }
+
+  // Flags a LOCALIZED hot spot (a likely real anomaly — a faulty cell, a blocked diode, a hot
+  // connector) as distinct from the whole frame simply being warm from sun exposure. Based on
+  // how far the hottest pixels sit above this photo's own mean/stddev (a z-score), bounded so a
+  // cluster that is too small (sensor noise) or too large (the whole roof) isn't flagged. This is
+  // a heuristic, not a validated fault classifier — tune the constants below against real results.
+  function computeThermalAnomaly(thermal) {
+    const raw = thermal.raw;
+    const n = raw.length;
+    let sum = 0, sumSq = 0, max = -Infinity;
+    for (let i = 0; i < n; i++) {
+      const v = raw[i];
+      sum += v; sumSq += v*v;
+      if (v > max) max = v;
+    }
+    const mean = sum / n;
+    const variance = Math.max(0, sumSq/n - mean*mean);
+    const stdev = Math.sqrt(variance);
+    const zMax = stdev > 0 ? (max - mean) / stdev : 0;
+    const hotRawThreshold = mean + 2*stdev;
+    let hotCount = 0;
+    for (let i = 0; i < n; i++) if (raw[i] >= hotRawThreshold) hotCount++;
+    const hotFrac = hotCount / n;
+    const isAnomaly = zMax >= 3 && hotCount >= 5 && hotFrac < 0.25;
+    return { zMax: +zMax.toFixed(2), hotFrac: +(hotFrac*100).toFixed(2), isAnomaly };
+  }
+
+  function computeLuminanceStats(record, img) {
     const tmp = document.createElement("canvas");
     tmp.width = record.w; tmp.height = record.h;
     const tctx = tmp.getContext("2d", { willReadFrequently: true });
-    tctx.drawImage(record.img, 0, 0);
+    tctx.drawImage(img, 0, 0);
     let data;
     try { data = tctx.getImageData(0, 0, record.w, record.h).data; }
     catch(e) { record.maxI = 0; record.avgI = 0; record.hotPct = 0; return; }
     let max = 0, sum = 0, count = 0, hot = 0;
-    const threshold = parseInt(el("threshold").value, 10);
+    const threshold = 200;
     for (let i = 0; i < data.length; i += 4) {
       const lum = 0.299*data[i] + 0.587*data[i+1] + 0.114*data[i+2];
       if (lum > max) max = lum;
@@ -819,25 +944,57 @@
       const btn = document.createElement("button");
       btn.className = "thumb-item" + (rec.id === activeId ? " active" : "");
       const unit = rec.thermal ? "°C" : "";
-      btn.innerHTML = `<img src="${rec.url}" alt=""><div class="meta"><div class="name">${escapeHtml(rec.name)}</div><div class="stat">${rec.hotPct > 5 ? '<span class="hotspot-dot"></span>' : ''}max ${rec.maxI}${unit} · ${rec.hotPct}% chaud</div></div>`;
+      const flagged = rec.anomaly && rec.anomaly.isAnomaly;
+      btn.innerHTML = `<img src="${rec.thumb}" alt=""><div class="meta"><div class="name">${escapeHtml(rec.name)}</div><div class="stat">${flagged ? '<span class="hotspot-dot"></span>' : ''}max ${rec.maxI}${unit} · ${rec.hotPct}% chaud</div></div>`;
       btn.addEventListener("click", () => selectImage(rec.id));
       list.appendChild(btn);
     });
   }
 
+  function getVisibleSortedImages() {
+    const onlyAnomaly = el("filter-anomaly").checked;
+    const sortBy = el("sort-select").value;
+    let list = images.slice();
+    if (onlyAnomaly) list = list.filter(r => r.anomaly && r.anomaly.isAnomaly);
+    if (sortBy === "severity") {
+      list.sort((a, b) => {
+        const za = a.anomaly ? a.anomaly.zMax : -Infinity;
+        const zb = b.anomaly ? b.anomaly.zMax : -Infinity;
+        if (za !== zb) return zb - za;
+        return b.maxI - a.maxI;
+      });
+    } else if (sortBy === "name") {
+      list.sort((a, b) => a.name.localeCompare(b.name));
+    } else if (sortBy === "date") {
+      list.sort((a, b) => a.date.localeCompare(b.date));
+    }
+    return list;
+  }
+
   function renderBatchTable() {
     const tbody = el("batch-tbody");
+    const list = getVisibleSortedImages();
     if (!images.length) {
-      tbody.innerHTML = '<tr><td colspan="8" style="color:var(--text-dim);">Aucune image importée pour le moment.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="9" style="color:var(--text-dim);">Aucune image importée pour le moment.</td></tr>';
+      return;
+    }
+    if (!list.length) {
+      tbody.innerHTML = '<tr><td colspan="9" style="color:var(--text-dim);">Aucune image ne correspond au filtre.</td></tr>';
       return;
     }
     tbody.innerHTML = "";
-    images.forEach((rec, i) => {
+    list.forEach((rec, i) => {
       const tr = document.createElement("tr");
       const gpsStr = rec.gps ? `${rec.gps.lat.toFixed(5)}, ${rec.gps.lon.toFixed(5)}` : "—";
       const unit = rec.thermal ? "°C" : "";
+      const anomalyCell = rec.anomaly
+        ? (rec.anomaly.isAnomaly
+            ? `<span class="anomaly-tag yes">Probable (z=${rec.anomaly.zMax})</span>`
+            : `<span class="anomaly-tag no">Normal</span>`)
+        : `<span class="anomaly-tag no">—</span>`;
       tr.innerHTML = `<td>${i+1}</td><td>${escapeHtml(rec.name)}</td><td>${escapeHtml(rec.date)}</td><td>${gpsStr}</td>
         <td class="num mono">${rec.maxI}${unit}</td><td class="num mono">${rec.avgI}${unit}</td><td class="num mono">${rec.hotPct}%</td>
+        <td>${anomalyCell}</td>
         <td><button class="row-link" data-id="${rec.id}">Voir →</button></td>`;
       tr.querySelector(".row-link").addEventListener("click", () => selectImage(rec.id));
       tbody.appendChild(tr);
@@ -923,12 +1080,40 @@
     }
     el("diag-pre").textContent = diagLines.join("\n");
 
-    drawActiveImage();
+    loadActiveDecoded(rec);
+  }
+
+  // (Re)decodes the single image currently being viewed from its original File, discarding
+  // whatever was decoded for the previously-selected image first. Nothing from this is ever
+  // stored on the record — see the note by `activeDecoded` above.
+  function loadActiveDecoded(rec) {
+    if (activeDecoded) {
+      if (activeDecoded.url) URL.revokeObjectURL(activeDecoded.url);
+      activeDecoded = null;
+    }
+    const token = ++activeDecodeToken;
+    el("canvas-empty").style.display = "none";
+    canvas.style.display = "block";
+
+    const url = URL.createObjectURL(rec.file);
+    const img = new Image();
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      if (token !== activeDecodeToken) return;
+      showToast(`Impossible d'afficher "${rec.name}".`);
+    };
+    img.onload = () => {
+      if (token !== activeDecodeToken) { URL.revokeObjectURL(url); return; } // a newer selection superseded this one
+      const tempGrid = rec.thermal ? buildTempGrid(rec.thermal, img.naturalWidth, img.naturalHeight) : null;
+      activeDecoded = { img, url, tempGrid };
+      drawActiveImage();
+    };
+    img.src = url;
   }
 
   function drawActiveImage() {
     const rec = images.find(r => r.id === activeId);
-    if (!rec) return;
+    if (!rec || !activeDecoded) return;
     const wrapRect = wrap.getBoundingClientRect();
     const fitScale = Math.min(wrapRect.width / rec.w, wrapRect.height / rec.h) * 0.96;
     const effScale = fitScale * scale;
@@ -938,7 +1123,7 @@
     canvas.style.left = (wrapRect.width/2 - (rec.w*effScale)/2 + offsetX) + "px";
     canvas.style.top = (wrapRect.height/2 - (rec.h*effScale)/2 + offsetY) + "px";
     ctx.clearRect(0,0,canvas.width,canvas.height);
-    ctx.drawImage(rec.img, 0, 0);
+    ctx.drawImage(activeDecoded.img, 0, 0);
     imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
     if (el("hotspot-toggle").checked) applyHotspotOverlay();
@@ -947,8 +1132,7 @@
 
   function applyHotspotOverlay() {
     const threshold = parseFloat(el("threshold").value);
-    const rec = images.find(r => r.id === activeId);
-    const grid = rec && rec.thermal ? rec.thermal.tempGrid : null;
+    const grid = activeDecoded ? activeDecoded.tempGrid : null;
     const d = imageData.data;
     const overlay = ctx.getImageData(0,0,canvas.width,canvas.height);
     const od = overlay.data;
@@ -1035,10 +1219,9 @@
   });
 
   function drawRectOverlay() {
-    if (!rectCurrent) return;
-    const rec = images.find(r => r.id === activeId);
+    if (!rectCurrent || !activeDecoded) return;
     ctx.clearRect(0,0,canvas.width,canvas.height);
-    ctx.drawImage(rec.img, 0, 0);
+    ctx.drawImage(activeDecoded.img, 0, 0);
     if (el("hotspot-toggle").checked) applyHotspotOverlay();
     ctx.save();
     ctx.strokeStyle = "#E8914A";
@@ -1058,8 +1241,7 @@
     const x2 = Math.min(canvas.width, Math.max(rectCurrent.x1, rectCurrent.x2));
     const y2 = Math.min(canvas.height, Math.max(rectCurrent.y1, rectCurrent.y2));
     const threshold = parseFloat(el("threshold").value);
-    const rec = images.find(r => r.id === activeId);
-    const grid = rec && rec.thermal ? rec.thermal.tempGrid : null;
+    const grid = activeDecoded ? activeDecoded.tempGrid : null;
     const unit = grid ? "°C" : "";
     let min = Infinity, max = -Infinity, sum = 0, count = 0, hot = 0;
     const d = imageData.data;
@@ -1106,6 +1288,8 @@
   });
   el("hotspot-toggle").addEventListener("change", () => { if (activeId) drawActiveImage(); });
   el("zoom-reset").addEventListener("click", () => { scale = 1; offsetX = 0; offsetY = 0; if (activeId) drawActiveImage(); });
+  el("filter-anomaly").addEventListener("change", renderBatchTable);
+  el("sort-select").addEventListener("change", renderBatchTable);
 
   el("file-input").addEventListener("change", (e) => handleFiles(e.target.files));
   wrap.addEventListener("dragover", (e) => e.preventDefault());
@@ -1114,6 +1298,9 @@
   document.body.addEventListener("drop", (e) => { e.preventDefault(); if (e.target === document.body) handleFiles(e.dataTransfer.files); });
 
   el("clear-all").addEventListener("click", () => {
+    if (activeDecoded && activeDecoded.url) URL.revokeObjectURL(activeDecoded.url);
+    activeDecoded = null;
+    activeDecodeToken++;
     images.length = 0; activeId = null;
     renderThumbList(); renderBatchTable(); updateGlobalButtons();
     el("empty-hint").style.display = "block";
@@ -1128,37 +1315,44 @@
 
   // ---------- EXPORTS ----------
   el("export-csv").addEventListener("click", () => {
-    const header = ["Fichier","Date","GPS_lat","GPS_lon","Altitude_m","Unite","Valeur_max","Valeur_moy","Points_chauds_pct","Mode"];
+    const header = ["Fichier","Date","GPS_lat","GPS_lon","Altitude_m","Unite","Valeur_max","Valeur_moy","Points_chauds_pct","Mode","Anomalie_probable","Score_z"];
     const rows = images.map(r => [
       r.name, r.date,
       r.gps ? r.gps.lat.toFixed(6) : "", r.gps ? r.gps.lon.toFixed(6) : "",
       r.alt || "", r.thermal ? "°C" : "relatif(0-255)", r.maxI, r.avgI, r.hotPct,
-      r.thermal ? "Calibré (estimation DJI)" : "Intensité relative"
+      r.thermal ? "Calibré (estimation DJI)" : "Intensité relative",
+      r.anomaly ? (r.anomaly.isAnomaly ? "OUI" : "non") : "",
+      r.anomaly ? r.anomaly.zMax : ""
     ]);
     const csv = [header, ...rows].map(row => row.map(v => `"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
     downloadBlob(new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" }), "inspection-thermique.csv");
   });
 
   el("export-pdf").addEventListener("click", async () => {
+    if (images.length > 150 && !confirm(`${images.length} photos : le PDF sera volumineux et peut être lent à générer. Continuer ? (L'export CSV est plus adapté pour de très gros lots.)`)) return;
+
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF({ unit: "mm", format: "a4" });
     const pageW = 210, margin = 16;
+    const sorted = getVisibleSortedImages();
 
     doc.setFontSize(18);
     doc.text("Rapport d'inspection thermique", margin, 22);
     doc.setFontSize(10);
     doc.setTextColor(120);
-    doc.text(`Généré le ${new Date().toLocaleDateString("fr-FR")} — ${images.length} image(s)`, margin, 29);
+    const anomalyCount = sorted.filter(r => r.anomaly && r.anomaly.isAnomaly).length;
+    doc.text(`Généré le ${new Date().toLocaleDateString("fr-FR")} — ${sorted.length} image(s) — ${anomalyCount} anomalie(s) probable(s)`, margin, 29);
     doc.setTextColor(0);
 
-    for (let i = 0; i < images.length; i++) {
-      const rec = images[i];
+    for (let i = 0; i < sorted.length; i++) {
+      const rec = sorted[i];
       if (i > 0) doc.addPage();
       else doc.text("", margin, 36);
       let y = i === 0 ? 40 : 20;
 
       doc.setFontSize(13);
-      doc.text(rec.name, margin, y); y += 7;
+      const flagged = rec.anomaly && rec.anomaly.isAnomaly;
+      doc.text(rec.name + (flagged ? "  ⚠ ANOMALIE PROBABLE" : ""), margin, y); y += 7;
       doc.setFontSize(9);
       doc.setTextColor(100);
       doc.text(`Date: ${rec.date}`, margin, y); y += 5;
@@ -1166,13 +1360,9 @@
       doc.text(`Altitude relative: ${rec.alt ? parseFloat(rec.alt).toFixed(1) + " m" : "non disponible"}`, margin, y); y += 8;
       doc.setTextColor(0);
 
-      const tmp = document.createElement("canvas");
-      tmp.width = rec.w; tmp.height = rec.h;
-      tmp.getContext("2d").drawImage(rec.img, 0, 0);
-      const imgData = tmp.toDataURL("image/jpeg", 0.85);
       const imgW = pageW - margin*2;
       const imgH = imgW * (rec.h / rec.w);
-      doc.addImage(imgData, "JPEG", margin, y, imgW, Math.min(imgH, 140));
+      doc.addImage(rec.thumb, "JPEG", margin, y, imgW, Math.min(imgH, 140));
       y += Math.min(imgH, 140) + 8;
 
       doc.setFontSize(10);
@@ -1181,13 +1371,69 @@
         y += 5;
         doc.setFontSize(8);
         doc.setTextColor(120);
-        doc.text(`Estimation calibrée à partir des données DJI intégrées — pas une mesure radiométrique certifiée.`, margin, y);
+        doc.text(`Estimation calibrée à partir des données DJI intégrées — pas une mesure radiométrique certifiée. Anomalie: heuristique statistique (z=${rec.anomaly ? rec.anomaly.zMax : "—"}), à vérifier sur site.`, margin, y);
         doc.setTextColor(0);
       } else {
         doc.text(`Intensité max: ${rec.maxI}/255   Intensité moyenne: ${rec.avgI}/255   Points chauds: ${rec.hotPct}%`, margin, y);
       }
     }
     doc.save("rapport-inspection-thermique.pdf");
+  });
+
+  // ---------- GPS ANOMALY MAP ----------
+  let leafletMap = null, leafletMarkers = [];
+
+  function renderMap() {
+    if (typeof L === "undefined") {
+      el("map-container").textContent = "Carte indisponible (bibliothèque non chargée).";
+      return;
+    }
+    if (!leafletMap) {
+      leafletMap = L.map("map-container").setView([20, 0], 2);
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 21,
+        attribution: "© OpenStreetMap"
+      }).addTo(leafletMap);
+    }
+    leafletMarkers.forEach(m => leafletMap.removeLayer(m));
+    leafletMarkers = [];
+
+    const withGps = images.filter(r => r.gps);
+    el("map-stat-total").textContent = withGps.length;
+    el("map-stat-anomaly").textContent = withGps.filter(r => r.anomaly && r.anomaly.isAnomaly).length;
+    el("map-no-gps").style.display = withGps.length === 0 ? "block" : "none";
+
+    withGps.forEach(rec => {
+      const flagged = rec.anomaly && rec.anomaly.isAnomaly;
+      const marker = L.circleMarker([rec.gps.lat, rec.gps.lon], {
+        radius: flagged ? 9 : 6,
+        color: flagged ? "#E8483A" : "#8C98A6",
+        fillColor: flagged ? "#E8483A" : "#8C98A6",
+        fillOpacity: 0.85,
+        weight: 2,
+      }).addTo(leafletMap);
+      const unit = rec.thermal ? "°C" : "";
+      const popupEl = document.createElement("div");
+      popupEl.className = "map-popup";
+      popupEl.innerHTML = `<img src="${rec.thumb}" alt=""><div class="name">${escapeHtml(rec.name)}</div><div class="stat">Max ${rec.maxI}${unit}${flagged ? " · ⚠ anomalie probable" : ""}</div><button type="button">Ouvrir cette photo →</button>`;
+      popupEl.querySelector("button").addEventListener("click", () => {
+        document.querySelector('.tab-btn[data-tab="thermal"]').click();
+        selectImage(rec.id);
+      });
+      marker.bindPopup(popupEl);
+      leafletMarkers.push(marker);
+    });
+
+    setTimeout(() => {
+      leafletMap.invalidateSize();
+      if (withGps.length) {
+        leafletMap.fitBounds(withGps.map(r => [r.gps.lat, r.gps.lon]), { padding: [30,30], maxZoom: 19 });
+      }
+    }, 50);
+  }
+
+  document.querySelectorAll('.tab-btn[data-tab="map"]').forEach(btn => {
+    btn.addEventListener("click", renderMap);
   });
 })();
 </script>
